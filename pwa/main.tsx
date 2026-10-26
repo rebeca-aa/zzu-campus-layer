@@ -76,14 +76,15 @@ function pushNote(text: string) {
   window.dispatchEvent(new CustomEvent("campus-note", { detail: text }));
 }
 
-/** 三套配色。teal 是后加的「蓝绿」：和 ink 共用深色骨架，只换一组变量。 */
-type ThemeName = 'cream' | 'ink' | 'teal';
+/** 四套配色。后三套都是深色骨架，只换一组 CSS 变量（magenta 是后加的「紫红」）。 */
+type ThemeName = 'cream' | 'ink' | 'teal' | 'magenta';
 
 /** 状态栏/地址栏跟着配色走，免得换完主题上边还留着旧颜色。 */
 const THEME_COLOR: Record<ThemeName, string> = {
   cream: '#f4ebd7',
   ink: '#0b1220',
   teal: '#07191a',
+  magenta: '#160710',
 };
 
 function syncThemeMeta(next: ThemeName): void {
@@ -147,7 +148,7 @@ function App() {
   const [renewNote, setRenewNote] = useState<'' | 'ok' | 'fail'>('');
   const [renewStep, setRenewStep] = useState('');
   const buildVersion = typeof __APP_VERSION__ === 'string' ? __APP_VERSION__ : 'dev';
-  /* 配色：cream=米白 / ink=黑+藏青 / teal=黑+蓝绿（默认 ink） */
+  /* 配色：cream=米白 / ink=黑+藏青 / teal=黑+蓝绿 / magenta=黑+紫红（默认 ink） */
   const [theme, setTheme] = useState<ThemeName>('ink');
   const applyTheme = async (next: ThemeName) => {
     setTheme(next);
@@ -177,7 +178,8 @@ function App() {
     setLlm(await getLlmSettings());
     setNoticePrefsState(await getNoticePrefs());
       const themePref = await getKV().get<string>('theme');
-      const t: ThemeName = themePref === 'cream' || themePref === 'teal' ? themePref : 'ink';
+      const t: ThemeName =
+        themePref === 'cream' || themePref === 'teal' || themePref === 'magenta' ? themePref : 'ink';
       setTheme(t);
       document.documentElement.dataset.theme = t;
       syncThemeMeta(t);
@@ -753,6 +755,7 @@ function App() {
               <button type="button" class={theme === 'cream' ? 'ghost on' : 'ghost'} onClick={() => void applyTheme('cream')}>米白</button>
               <button type="button" class={theme === 'ink' ? 'ghost on' : 'ghost'} onClick={() => void applyTheme('ink')}>藏青</button>
               <button type="button" class={theme === 'teal' ? 'ghost on' : 'ghost'} onClick={() => void applyTheme('teal')}>蓝绿</button>
+              <button type="button" class={theme === 'magenta' ? 'ghost on' : 'ghost'} onClick={() => void applyTheme('magenta')}>紫红</button>
             </div>
             <label class="row" style="align-items:center;gap:8px">
             <input

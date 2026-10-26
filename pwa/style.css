@@ -1059,160 +1059,140 @@ html[data-theme='teal'] {
   color-scheme: dark;
 }
 
-html[data-theme='ink'] body,
-html[data-theme='teal'] body {
+/* 紫红：同一副深色骨架，换成酒紫底 + 紫红主色 */
+html[data-theme='magenta'] {
+  --bg: #160710;
+  --panel: #25101d;
+  --text: #f9e9f1;
+  --dim: #c094aa;
+  --accent: #b0185a;
+  --shade: #1d0b16;
+  --hairline: #45202f;
+  --link: #ff6fa8;
+  --placeholder: #96637c;
+  --self-bubble: #b0185a;
+  --self-bubble-text: #fff0f6;
+  --header-line: #3a1826;
+  --ok: #4ec9a0;
+  --warn: #e0b060;
+  --err: #ef6b6b;
+  color-scheme: dark;
+}
+
+html:not([data-theme='cream']) body {
   background: var(--bg);
   color: var(--text);
 }
 
-html[data-theme='ink'] header,
-html[data-theme='teal'] header {
+html:not([data-theme='cream']) header {
   background: transparent !important;
   color: var(--text) !important;
   border-bottom: 1px solid var(--header-line) !important;
 }
 
-html[data-theme='ink'] header .chip,
-html[data-theme='ink'] header .mini,
-html[data-theme='teal'] header .chip,
-html[data-theme='teal'] header .mini {
+html:not([data-theme='cream']) header .chip,
+html:not([data-theme='cream']) header .mini {
   color: var(--dim) !important;
 }
 
-html[data-theme='ink'] .bubble,
-html[data-theme='teal'] .bubble {
+html:not([data-theme='cream']) .bubble {
   background: var(--panel) !important;
   color: var(--text) !important;
 }
 
-html[data-theme='ink'] .bubble.me,
-html[data-theme='ink'] .bubble.user,
-html[data-theme='ink'] .bubble.user-msg,
-html[data-theme='teal'] .bubble.me,
-html[data-theme='teal'] .bubble.user,
-html[data-theme='teal'] .bubble.user-msg {
+html:not([data-theme='cream']) .bubble.me,
+html:not([data-theme='cream']) .bubble.user,
+html:not([data-theme='cream']) .bubble.user-msg {
   background: var(--self-bubble) !important;
   color: var(--self-bubble-text) !important;
 }
 
-html[data-theme='ink'] .quick button,
-html[data-theme='ink'] .quick,
-html[data-theme='teal'] .quick button,
-html[data-theme='teal'] .quick {
+html:not([data-theme='cream']) .quick button,
+html:not([data-theme='cream']) .quick {
   color: var(--dim) !important;
   background: transparent !important;
 }
 
-html[data-theme='ink'] .dock,
-html[data-theme='teal'] .dock {
+html:not([data-theme='cream']) .dock {
   background: var(--shade) !important;
 }
 
-html[data-theme='ink'] .dock .composer input,
-html[data-theme='teal'] .dock .composer input {
+html:not([data-theme='cream']) .dock .composer input {
   color: var(--text) !important;
   background: transparent !important;
   border-bottom: 1px solid var(--hairline) !important;
 }
 
-html[data-theme='ink'] .dock .composer input::placeholder,
-html[data-theme='teal'] .dock .composer input::placeholder {
+html:not([data-theme='cream']) .dock .composer input::placeholder {
   color: var(--placeholder) !important;
 }
 
-html[data-theme='ink'] .dock .composer button,
-html[data-theme='teal'] .dock .composer button {
+html:not([data-theme='cream']) .dock .composer button {
   color: var(--link) !important;
 }
 
-html[data-theme='ink'] .dock .deco,
-html[data-theme='teal'] .dock .deco {
+html:not([data-theme='cream']) .dock .deco {
   opacity: 0.45;
   filter: grayscale(1) brightness(0.85);
 }
 
-html[data-theme='ink'] .sheet,
-html[data-theme='teal'] .sheet {
+html:not([data-theme='cream']) .sheet {
   background: var(--shade) !important;
 }
 
-html[data-theme='ink'] .sheet textarea,
-html[data-theme='ink'] .sheet input[type='text'],
-html[data-theme='ink'] .sheet select,
-html[data-theme='teal'] .sheet textarea,
-html[data-theme='teal'] .sheet input[type='text'],
-html[data-theme='teal'] .sheet select {
+html:not([data-theme='cream']) .sheet textarea,
+html:not([data-theme='cream']) .sheet input[type='text'],
+html:not([data-theme='cream']) .sheet select {
   background: var(--panel) !important;
   color: var(--text) !important;
   border: 1px solid var(--hairline) !important;
 }
 
-html[data-theme='ink'] button.primary,
-html[data-theme='ink'] a.primary,
-html[data-theme='teal'] button.primary,
-html[data-theme='teal'] a.primary {
+html:not([data-theme='cream']) button.primary,
+html:not([data-theme='cream']) a.primary {
   background: var(--accent) !important;
   color: var(--self-bubble-text) !important;
 }
 
-html[data-theme='ink'] button.ghost,
-html[data-theme='ink'] a.ghost,
-html[data-theme='ink'] button.mini,
-html[data-theme='teal'] button.ghost,
-html[data-theme='teal'] a.ghost,
-html[data-theme='teal'] button.mini {
+html:not([data-theme='cream']) button.ghost,
+html:not([data-theme='cream']) a.ghost,
+html:not([data-theme='cream']) button.mini {
   background: var(--panel) !important;
   color: var(--text) !important;
 }
 
-html[data-theme='ink'] .nb,
-html[data-theme='ink'] .nb *,
-html[data-theme='teal'] .nb,
-html[data-theme='teal'] .nb * {
+html:not([data-theme='cream']) .nb,
+html:not([data-theme='cream']) .nb * {
   color: var(--text) !important;
 }
 
-html[data-theme='ink'] .nb-hint,
-html[data-theme='ink'] .nb-readtag,
-html[data-theme='ink'] .nb-empty,
-html[data-theme='teal'] .nb-hint,
-html[data-theme='teal'] .nb-readtag,
-html[data-theme='teal'] .nb-empty {
+html:not([data-theme='cream']) .nb-hint,
+html:not([data-theme='cream']) .nb-readtag,
+html:not([data-theme='cream']) .nb-empty {
   color: var(--dim) !important;
 }
 
-html[data-theme='ink'] .nb-card-top,
-html[data-theme='ink'] .nb .nb-list > *,
-html[data-theme='teal'] .nb-card-top,
-html[data-theme='teal'] .nb .nb-list > * {
+html:not([data-theme='cream']) .nb-card-top,
+html:not([data-theme='cream']) .nb .nb-list > * {
   background: var(--panel) !important;
   border-bottom: 1px solid var(--hairline) !important;
 }
 
-html[data-theme='ink'] .nb-tabs,
-html[data-theme='ink'] .nb-actions,
-html[data-theme='ink'] .nb-subs,
-html[data-theme='ink'] .nb-today,
-html[data-theme='teal'] .nb-tabs,
-html[data-theme='teal'] .nb-actions,
-html[data-theme='teal'] .nb-subs,
-html[data-theme='teal'] .nb-today {
+html:not([data-theme='cream']) .nb-tabs,
+html:not([data-theme='cream']) .nb-actions,
+html:not([data-theme='cream']) .nb-subs,
+html:not([data-theme='cream']) .nb-today {
   border-bottom: 1px solid var(--hairline) !important;
 }
 
-html[data-theme='ink'] .nb-tab + .nb-tab,
-html[data-theme='ink'] .nb-btn + .nb-btn,
-html[data-theme='ink'] .nb-mini + .nb-mini,
-html[data-theme='teal'] .nb-tab + .nb-tab,
-html[data-theme='teal'] .nb-btn + .nb-btn,
-html[data-theme='teal'] .nb-mini + .nb-mini {
+html:not([data-theme='cream']) .nb-tab + .nb-tab,
+html:not([data-theme='cream']) .nb-btn + .nb-btn,
+html:not([data-theme='cream']) .nb-mini + .nb-mini {
   border-left: 1px solid var(--hairline) !important;
 }
 
-html[data-theme='ink'] .hint,
-html[data-theme='ink'] .note,
-html[data-theme='teal'] .hint,
-html[data-theme='teal'] .note {
+html:not([data-theme='cream']) .hint,
+html:not([data-theme='cream']) .note {
   color: var(--dim);
 }
 
@@ -1235,8 +1215,7 @@ html[data-theme='teal'] .note {
   background: var(--accent) !important;
   color: #fff !important;
 }
-html[data-theme='ink'] .dock .deco,
-html[data-theme='teal'] .dock .deco {
+html:not([data-theme='cream']) .dock .deco {
   opacity: 0.92 !important;
   filter: none !important;
 }
@@ -1578,42 +1557,42 @@ html[data-theme='ink'] .msg.user .bubble {
   border-color: #ffffff !important;
 }
 
-html[data-theme='ink'] .msg.user .bubble .md strong,
-html[data-theme='ink'] .msg.user .bubble strong {
+html:not([data-theme='cream']) .msg.user .bubble .md strong,
+html:not([data-theme='cream']) .msg.user .bubble strong {
   color: #0f1f3d;
 }
 
 /* 米白下回答气泡是象牙白，`.md strong{color:#fff}` 会直接看不见，压回墨色 */
-html:not([data-theme='ink']) .bubble .md strong,
-html:not([data-theme='ink']) .bubble strong {
+html[data-theme='cream'] .bubble .md strong,
+html[data-theme='cream'] .bubble strong {
   color: #0f1f3d !important;
 }
 
 /* 米白配色下：白底气泡会糊进米黄背景里，改成蓝底（跟顶栏同一个蓝） */
-html:not([data-theme='ink']) .msg.user .bubble {
+html[data-theme='cream'] .msg.user .bubble {
   background: #1b4fd8 !important;
   color: #fdf8ec !important;
   border-color: #1b4fd8 !important;
   box-shadow: 0 1px 3px rgba(27, 79, 216, 0.3);
 }
 
-html:not([data-theme='ink']) .msg.user .bubble .md strong,
-html:not([data-theme='ink']) .msg.user .bubble strong {
+html[data-theme='cream'] .msg.user .bubble .md strong,
+html[data-theme='cream'] .msg.user .bubble strong {
   color: #ffffff !important;
 }
 
-html:not([data-theme='ink']) .msg.user .bubble a {
+html[data-theme='cream'] .msg.user .bubble a {
   color: #d6e4ff;
   text-decoration-color: rgba(214, 228, 255, 0.6);
 }
 
-html:not([data-theme='ink']) .msg.user .bubble .via,
-html:not([data-theme='ink']) .msg.user .bubble .md figcaption {
+html[data-theme='cream'] .msg.user .bubble .via,
+html[data-theme='cream'] .msg.user .bubble .md figcaption {
   color: #c6d7f8;
 }
 
 /* 回答在米白上贴象牙白，描边收细一点，别像块黑框 */
-html:not([data-theme='ink']) .bubble {
+html[data-theme='cream'] .bubble {
   background: #fffdf7 !important;
   border-color: rgba(15, 31, 61, 0.18) !important;
   box-shadow: 0 1px 2px rgba(15, 31, 61, 0.08);
