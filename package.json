@@ -1,7 +1,7 @@
 {
   "name": "zzu-campus-layer",
   "private": true,
-  "version": "0.2.36",
+  "version": "0.2.37",
   "type": "module",
   "description": "郑州大学「校园信息层」——基于实测 API 的 MV3 侧边栏助手",
   "scripts": {

@@ -1584,36 +1584,36 @@ html[data-theme='ink'] .msg.user .bubble strong {
 }
 
 /* 米白下回答气泡是象牙白，`.md strong{color:#fff}` 会直接看不见，压回墨色 */
-html:not([data-theme='ink']) .bubble .md strong,
-html:not([data-theme='ink']) .bubble strong {
+html:not([data-theme='ink']):not([data-theme='teal']) .bubble .md strong,
+html:not([data-theme='ink']):not([data-theme='teal']) .bubble strong {
   color: #0f1f3d !important;
 }
 
 /* 米白配色下：白底气泡会糊进米黄背景里，改成蓝底（跟顶栏同一个蓝） */
-html:not([data-theme='ink']) .msg.user .bubble {
+html:not([data-theme='ink']):not([data-theme='teal']) .msg.user .bubble {
   background: #1b4fd8 !important;
   color: #fdf8ec !important;
   border-color: #1b4fd8 !important;
   box-shadow: 0 1px 3px rgba(27, 79, 216, 0.3);
 }
 
-html:not([data-theme='ink']) .msg.user .bubble .md strong,
-html:not([data-theme='ink']) .msg.user .bubble strong {
+html:not([data-theme='ink']):not([data-theme='teal']) .msg.user .bubble .md strong,
+html:not([data-theme='ink']):not([data-theme='teal']) .msg.user .bubble strong {
   color: #ffffff !important;
 }
 
-html:not([data-theme='ink']) .msg.user .bubble a {
+html:not([data-theme='ink']):not([data-theme='teal']) .msg.user .bubble a {
   color: #d6e4ff;
   text-decoration-color: rgba(214, 228, 255, 0.6);
 }
 
-html:not([data-theme='ink']) .msg.user .bubble .via,
-html:not([data-theme='ink']) .msg.user .bubble .md figcaption {
+html:not([data-theme='ink']):not([data-theme='teal']) .msg.user .bubble .via,
+html:not([data-theme='ink']):not([data-theme='teal']) .msg.user .bubble .md figcaption {
   color: #c6d7f8;
 }
 
 /* 回答在米白上贴象牙白，描边收细一点，别像块黑框 */
-html:not([data-theme='ink']) .bubble {
+html:not([data-theme='ink']):not([data-theme='teal']) .bubble {
   background: #fffdf7 !important;
   border-color: rgba(15, 31, 61, 0.18) !important;
   box-shadow: 0 1px 2px rgba(15, 31, 61, 0.08);

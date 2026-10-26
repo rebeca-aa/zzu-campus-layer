@@ -5,7 +5,7 @@ const r = (p: string) => fileURLToPath(new URL(p, import.meta.url));
 
 export default defineConfig({
   publicDir: r('./public'),
-  define: { __APP_VERSION__: JSON.stringify('0.2.36') },
+  define: { __APP_VERSION__: JSON.stringify('0.2.37') },
   // 相对 base：产物里的资源引用是相对 HTML 的，
   // 这样 dist 既可以放域名根（Cloudflare Pages / Netlify），也可以放子路径（GitHub Pages 项目页）。
   base: './',
