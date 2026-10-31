@@ -14,6 +14,77 @@ import { getKV } from './kv';
 export const ECARD_BASE = 'https://ecard.v.zzu.edu.cn';
 /** accessToken 名义上 45 分钟一刷，这里保守一点按 30 分钟算 */
 const TOKEN_TTL = 30 * 60_000;
+
+/**
+ * 一卡通这几个接口**没有 CORS 头**（实测：`OPTIONS` 预检直接 403，`GET /h5/index.html`
+ * 不带 `Access-Control-Allow-Origin`），所以网页里 `fetch` 会被浏览器拦掉，
+ * 只有两种环境能真的发出去：
+ *   1. 安卓壳：走 `CampusNet.http` 这个原生通道；
+ *   2. 扩展面板（MV3 侧栏）：有 host_permissions，浏览器放行。
+ * 网页 PWA 里无论怎么写都发不出去，只能老实告诉用户。
+ */
+interface NativeNet {
+  http?: (method: string, url: string, headersJson: string, body: string) => string;
+}
+
+function nativeNet(): NativeNet | null {
+  const w = globalThis as unknown as { CampusNet?: NativeNet };
+  return w.CampusNet && typeof w.CampusNet.http === 'function' ? w.CampusNet : null;
+}
+
+/** 当前环境能不能直接连一卡通（安卓壳 / 扩展里为 true） */
+export function nativeNetAvailable(): boolean {
+  return nativeNet() !== null;
+}
+
+export interface EcardResponse {
+  status: number;
+  text: string;
+  /** 跳转目标：壳里是 Location 头，浏览器里是跟随之后的最终 URL */
+  location: string;
+}
+
+async function ecardRequest(
+  method: string,
+  url: string,
+  headers: Record<string, string> = {},
+  body?: unknown,
+): Promise<EcardResponse> {
+  const payload = body === undefined ? '' : JSON.stringify(body);
+  const net = nativeNet();
+  if (net?.http) {
+    const raw = net.http(method, url, JSON.stringify(headers), payload);
+    let parsed: { status?: number; body?: string; location?: string; error?: string };
+    try {
+      parsed = JSON.parse(raw) as typeof parsed;
+    } catch {
+      throw new Error('壳里的网络通道返回了看不懂的东西。');
+    }
+    if (parsed.error) throw new Error(`壳里发请求失败：${parsed.error}`);
+    return { status: parsed.status ?? 0, text: parsed.body ?? '', location: parsed.location ?? '' };
+  }
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      method,
+      headers: { ...(payload ? { 'content-type': 'application/json' } : {}), ...headers },
+      ...(payload ? { body: payload } : {}),
+      credentials: 'omit',
+      cache: 'no-store',
+      redirect: 'follow',
+    });
+  } catch (err) {
+    if (err instanceof TypeError) {
+      throw new Error('浏览器不让网页直接访问一卡通（跨域限制）：装安卓壳，或用电脑上的扩展面板。');
+    }
+    throw err;
+  }
+  return {
+    status: res.status,
+    text: await res.text(),
+    location: res.url || res.headers.get('location') || '',
+  };
+}
 export const ENERGY_KEY = 'energy';
 export const ENERGY_STATE_KEY = 'energyState';
 export const HISTORY_LIMIT = 60;
@@ -105,24 +176,32 @@ export function pickRoom(node: unknown, depth = 0): string | undefined {
 
 let cached: { token: string; access: string; exp: number } | null = null;
 
-/** 拿 ecard 的 accessToken（内部缓存 30 分钟） */
+/**
+ * 拿到 ecard 的 accessToken（内部缓存 30 分钟）。
+ *
+ * ⚠️ 这里必须 `redirect: 'follow'` 而不是 `'manual'`：
+ * 浏览器里 `redirect:'manual'` 拿到的是 opaque-redirect，**读不到 Location 头**
+ * （`headers.get('location')` 恒为 null、`status` 恒为 0），
+ * 跟着跳转过去反而能从 `res.url` 里直接看见 `?tid=…`。
+ * 之前用 manual，网页版永远判定「一卡通没认这个登录态」，自动识别一次都没成功过。
+ */
 export async function ecardToken(userToken: string, now = Date.now()): Promise<string> {
   if (cached && cached.token === userToken && cached.exp > now) return cached.access;
-  const open = await fetch(
+  const open = await ecardRequest(
+    'GET',
     `${ECARD_BASE}/server/auth/host/open?host=11&org=2&token=${encodeURIComponent(userToken)}`,
-    { redirect: 'manual', credentials: 'omit', cache: 'no-store' },
   );
-  const location = open.headers.get('location') ?? '';
-  const tid = /[?&]tid=([^&#]+)/.exec(location)?.[1];
+  const tid = /[?&]tid=([^&#]+)/.exec(open.location)?.[1];
   if (!tid) throw new Error('一卡通没认这个登录态：去「我的 → 账号」重新登录一次试试。');
-  const res = await fetch(`${ECARD_BASE}/server/auth/getToken`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ tid: decodeURIComponent(tid) }),
-    credentials: 'omit',
-    cache: 'no-store',
+  const res = await ecardRequest('POST', `${ECARD_BASE}/server/auth/getToken`, {}, {
+    tid: decodeURIComponent(tid),
   });
-  const json = (await res.json()) as { resultData?: { accessToken?: string } };
+  let json: { resultData?: { accessToken?: string } };
+  try {
+    json = JSON.parse(res.text) as typeof json;
+  } catch {
+    throw new Error('一卡通换 token 时返回了看不懂的内容。');
+  }
   const access = json.resultData?.accessToken;
   if (!access) throw new Error('一卡通没给 accessToken（可能登录态过期了）。');
   cached = { token: userToken, access, exp: now + TOKEN_TTL };
@@ -134,23 +213,22 @@ export async function fetchRoomBalance(userToken: string, room: string): Promise
   const parsed = parseRoom(room);
   if (!parsed) throw new Error(`房间号格式不对：${room}（应该像 99-1--1-101）`);
   const access = await ecardToken(userToken);
-  const res = await fetch(`${ECARD_BASE}/server/utilities/account`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', authorization: access },
-    body: JSON.stringify({
-      utilityType: 'electric',
-      bigArea: '',
-      area: parsed.area,
-      building: parsed.building,
-      unit: '',
-      level: parsed.level,
-      room: parsed.room,
-      subArea: '',
-    }),
-    credentials: 'omit',
-    cache: 'no-store',
+  const res = await ecardRequest('POST', `${ECARD_BASE}/server/utilities/account`, { authorization: access }, {
+    utilityType: 'electric',
+    bigArea: '',
+    area: parsed.area,
+    building: parsed.building,
+    unit: '',
+    level: parsed.level,
+    room: parsed.room,
+    subArea: '',
   });
-  const json = (await res.json()) as unknown;
+  let json: unknown;
+  try {
+    json = JSON.parse(res.text) as unknown;
+  } catch {
+    throw new Error('一卡通返回了看不懂的内容，可能登录态过期了。');
+  }
   const balance = pickBalance(json);
   if (balance === undefined) throw new Error('一卡通没返回能看懂的余额，可能这个房间号不存在。');
   return { balance, ...(pickRoom(json) ? { defaultRoom: pickRoom(json) } : {}) };
@@ -165,16 +243,15 @@ export async function fetchRoomBalance(userToken: string, room: string): Promise
  */
 export async function discoverRoom(userToken: string): Promise<string | undefined> {
   const access = await ecardToken(userToken);
-  const res = await fetch(`${ECARD_BASE}/server/utilities/config`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', authorization: access },
-    body: JSON.stringify({ utilityType: 'electric' }),
-    credentials: 'omit',
-    cache: 'no-store',
+  const res = await ecardRequest('POST', `${ECARD_BASE}/server/utilities/config`, { authorization: access }, {
+    utilityType: 'electric',
   });
-  const json = (await res.json()) as {
-    resultData?: { location?: { room?: unknown } };
-  };
+  let json: { resultData?: { location?: { room?: unknown } } };
+  try {
+    json = JSON.parse(res.text) as typeof json;
+  } catch {
+    return undefined;
+  }
   const room = json.resultData?.location?.room;
   if (typeof room === 'string' && parseRoom(room)) return room;
   return pickRoom(json);
@@ -221,24 +298,23 @@ export async function fetchPlaces(userToken: string, parentId = ''): Promise<Pla
   const query = locationQuery(parentId);
   if (!query) throw new Error(`房间号格式不对：${parentId}`);
   const access = await ecardToken(userToken);
-  const res = await fetch(LOCATION_URL, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', authorization: access },
-    body: JSON.stringify({
-      utilityType: 'electric',
-      locationType: query.locationType,
-      bigArea: '',
-      area: query.area,
-      building: query.building,
-      unit: '',
-      level: query.level,
-      room: '',
-      subArea: '',
-    }),
-    credentials: 'omit',
-    cache: 'no-store',
+  const res = await ecardRequest('POST', LOCATION_URL, { authorization: access }, {
+    utilityType: 'electric',
+    locationType: query.locationType,
+    bigArea: '',
+    area: query.area,
+    building: query.building,
+    unit: '',
+    level: query.level,
+    room: '',
+    subArea: '',
   });
-  const json = (await res.json()) as { resultData?: { locationList?: unknown } };
+  let json: { resultData?: { locationList?: unknown } };
+  try {
+    json = JSON.parse(res.text) as typeof json;
+  } catch {
+    return [];
+  }
   const list = json.resultData?.locationList;
   if (!Array.isArray(list)) return [];
   const out: PlaceOption[] = [];

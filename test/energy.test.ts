@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   discoverRoom,
+  ecardToken,
   fetchPlaces,
   HISTORY_LIMIT,
   levelOf,
@@ -90,6 +91,53 @@ describe('pushPoint', () => {
     }
     expect(list).toHaveLength(HISTORY_LIMIT);
     expect(list[list.length - 1]!.light).toBe(HISTORY_LIMIT + 9);
+  });
+});
+
+describe('ecardToken', () => {
+  it('跟随跳转后从最终 URL 里取 tid（浏览器里读不到 Location 头）', async () => {
+    const real = globalThis.fetch;
+    const seen: string[] = [];
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      seen.push(`${init?.redirect ?? ''} ${url}`);
+      if (url.includes('/server/auth/host/open')) {
+        const res = new Response('', { status: 200 });
+        Object.defineProperty(res, 'url', {
+          value: 'https://ecard.v.zzu.edu.cn/h5/index.html?tid=TID-9#/',
+        });
+        return res;
+      }
+      return new Response(JSON.stringify({ resultData: { accessToken: 'ACC-9' } }));
+    }) as typeof fetch;
+    try {
+      await expect(ecardToken('tok-url-1')).resolves.toBe('ACC-9');
+      expect(seen.some((s) => s.startsWith('follow '))).toBe(true);
+    } finally {
+      globalThis.fetch = real;
+    }
+  });
+
+  it('既没有跳转也没有 tid 就报「没认登录态」', async () => {
+    const real = globalThis.fetch;
+    globalThis.fetch = (async () => new Response('login page', { status: 200 })) as typeof fetch;
+    try {
+      await expect(ecardToken('tok-url-2')).rejects.toThrow('一卡通没认这个登录态');
+    } finally {
+      globalThis.fetch = real;
+    }
+  });
+
+  it('浏览器跨域被拦时说人话，不是干巴巴的 Failed to fetch', async () => {
+    const real = globalThis.fetch;
+    globalThis.fetch = (async () => {
+      throw new TypeError('Failed to fetch');
+    }) as typeof fetch;
+    try {
+      await expect(ecardToken('tok-cors-1')).rejects.toThrow('浏览器不让网页直接访问一卡通');
+    } finally {
+      globalThis.fetch = real;
+    }
   });
 });
 

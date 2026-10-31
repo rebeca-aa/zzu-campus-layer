@@ -670,6 +670,10 @@ export function EnergyView(props: {
   hint?: string;
   /** 拉下一级的房间列表（校区 → 楼 → 单元 → 房间） */
   onFetchPlaces: (parentId: string) => Promise<PlaceOption[]>;
+  /** 再自动识别一次（失败后手点） */
+  onDetect: () => void;
+  /** 浏览器里跨域被拦、又没有壳的原生通道时给一句说明 */
+  unsupported?: boolean;
 }) {
   const [lightRoom, setLightRoom] = useState(props.lightRoom ?? '');
   const [acRoom, setAcRoom] = useState(props.acRoom ?? '');
@@ -765,6 +769,13 @@ export function EnergyView(props: {
 
       {props.hint && <p class="hint">{props.hint}</p>}
 
+      {props.unsupported && (
+        <p class="hint warn">
+          浏览器里读不到一卡通：那几个接口不带跨域许可，网页发的请求会被浏览器直接拦掉（就是刚才那个 Failed to
+          fetch）。在电脑上装扩展、点「宿舍电量」所在的面板才读得到；手机端要等我给安卓壳加上原生通道。
+        </p>
+      )}
+
       {(props.light !== undefined || last.length > 1) && (
         <div class="card">
           <div class="cardhead">
@@ -834,6 +845,9 @@ export function EnergyView(props: {
                 </label>
                 <button class="ghost wide" onClick={() => void startPicking()}>
                   从列表里选
+                </button>
+                <button class="ghost wide" onClick={props.onDetect} disabled={props.busy}>
+                  再自动识别一次
                 </button>
               </>
             )}

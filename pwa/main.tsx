@@ -48,7 +48,7 @@ import { todayShanghai } from '../src/core/util';
 import type { Term } from '../src/core/types';
 import { NoticeBoard } from '../src/ui/notice';
 import { EnergyView, HomeView, MineView, ScheduleView, TabBar, type Caller, type TabKey } from './views';
-import { discoverRoom, fetchPlaces, levelOf, loadHistory, loadSettings, pushPoint, readEnergy, saveHistory, saveSettings, type EnergyPoint, type EnergyReading, type EnergySettings } from '../src/core/energy';
+import { discoverRoom, fetchPlaces, levelOf, loadHistory, loadSettings, nativeNetAvailable, pushPoint, readEnergy, saveHistory, saveSettings, type EnergyPoint, type EnergyReading, type EnergySettings } from '../src/core/energy';
 import { fetchRelease, isNewer, SEEN_KEY, shouldAnnounce, type Release } from './update';
 import './style.css';
 import './tabs.css';
@@ -208,6 +208,9 @@ const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
   const [renewNote, setRenewNote] = useState<'' | 'ok' | 'fail'>('');
   const [renewStep, setRenewStep] = useState('');
   const buildVersion = typeof __APP_VERSION__ === 'string' ? __APP_VERSION__ : 'dev';
+  /* 扩展里（侧栏）有 host_permissions，跨域请求浏览器会放行；网页版没有 */
+  const inExtension =
+    typeof (globalThis as unknown as { chrome?: { runtime?: { id?: unknown } } }).chrome?.runtime?.id === 'string';
   /* 配色：cream=米白 / ink=黑+藏青 / teal=黑+蓝绿（默认 ink） */
   const [theme, setTheme] = useState<ThemeName>('ink');
   const applyTheme = async (next: ThemeName) => {
@@ -785,7 +788,7 @@ const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
       setEnergyRooms(rooms);
       if (!rooms.lightRoom && !rooms.acRoom) {
         /* 没填过房间号：先试着让一卡通自己报一次（zzupy 的 get_default_room 同一条路） */
-        if (!energyTriedDetect.current) {
+        if (!energyTriedDetect.current || force) {
           energyTriedDetect.current = true;
           setEnergyBusy(true);
           try {
@@ -795,9 +798,13 @@ const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
               setEnergyRooms(rooms);
               await saveSettings(rooms);
               setEnergyHint(`已经自动认出你的房间是 ${guess}；空调要是另一块表，把它的房间号补上。`);
+            } else {
+              setEnergyHint('一卡通这次没给出房间号：点「从列表里选」，或者直接照 99-1--1-101 这样填。');
             }
-          } catch {
-            /* 猜不出来就当没有，让用户自己填 */
+          } catch (err) {
+            setEnergyHint(
+              `自动识别没成：${err instanceof Error ? err.message : String(err)} —— 可以点「从列表里选」，或直接填房间号。`,
+            );
           } finally {
             setEnergyBusy(false);
           }
@@ -1477,6 +1484,8 @@ const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
             {...(energyError ? { error: energyError } : {})}
             {...(energyHint ? { hint: energyHint } : {})}
             onRefresh={() => void loadEnergy(true)}
+            onDetect={() => void loadEnergy(true)}
+            unsupported={!nativeNetAvailable() && !inExtension}
             onFetchPlaces={async (parentId) => {
               const session = await loadSession();
               const token = session.portalToken ?? session.jwxtToken;

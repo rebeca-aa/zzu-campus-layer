@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "郑大校园信息层",
-  "version": "0.3.10",
+  "version": "0.3.11",
   "description": "在你自己的校园账号下，把课表、通知、空教室、成绩收进一个侧边栏。",
   "minimum_chrome_version": "114",
   "permissions": [
@@ -22,6 +22,7 @@
     "https://jwxt.zzu.edu.cn/*",
     "http://chat.zzu.edu.cn/*",
     "http://order.lib.zzu.edu.cn/*",
+    "https://ecard.v.zzu.edu.cn/*",
     "https://api.deepseek.com/*",
     "https://api.siliconflow.cn/*",
     "https://dashscope.aliyuncs.com/*",
