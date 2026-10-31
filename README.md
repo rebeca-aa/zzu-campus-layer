@@ -462,10 +462,13 @@ mobile/android/      安卓壳（Gradle，零第三方依赖）
 
 | 项目 | 作者 | 许可 | 用在哪 |
 |---|---|---|---|
-| [ZZU.Py](https://github.com/Illustar0/ZZU.Py) | Illustar0 | MIT | 一卡通、教务接口的 Python 实现；宿舍电量的协议（host/open → getToken → utilities/account）照它写的 |
-| [ZZU-Electricity](https://github.com/TorCroft/ZZU-Electricity) | TorCroft | MIT | 电量监控与「低于阈值提醒」的做法参考 |
-| [ZZU-Electricity-Monitor](https://github.com/Elykia093/ZZU-Electricity-Monitor) | Elykia093 | MIT | 照明 / 空调分表、房间号编码格式（99-1--1-101） |
-| [ZZU-Dorm-Electricity-Balance-Base](https://github.com/rimrose/ZZU-Dorm-Electricity-Balance-Base) | rimrose | MIT | 余额曲线的呈现方式 |
+| [ZZU.Py](https://github.com/Illustar0/ZZU.Py) | Illustar0 | MIT | 一卡通、教务这些接口的 Python 实现，摸接口时对照着看过 |
+
+> 早先还参照过 [ZZU-Electricity](https://github.com/TorCroft/ZZU-Electricity)、
+> [ZZU-Electricity-Monitor](https://github.com/Elykia093/ZZU-Electricity-Monitor)、
+> [ZZU-Dorm-Electricity-Balance-Base](https://github.com/rimrose/ZZU-Dorm-Electricity-Balance-Base)
+> 做过「宿舍电量」：一卡通那几个接口不带 CORS，手机网页里发不出去，只有壳的原生请求或扩展面板才行。
+> 这个功能后来去掉了，代码里已经没有了，仍谢谢这几位把协议摸清楚并开源出来。
 
 **技术栈**
 

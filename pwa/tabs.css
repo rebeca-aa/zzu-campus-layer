@@ -253,7 +253,7 @@ header.top .acts {
 /* 主页：三个入口（浅色卡片 + 小图标，三种配色各不一样） */
 .tiles {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
+  grid-template-columns: repeat(3, 1fr);
   gap: 10px;
 }
 .tile {
@@ -1062,104 +1062,6 @@ html[data-theme='teal'] .tile-card .art {
 }
 
 
-/* 宿舍电量：淡紫（米白） */
-.tile-energy {
-  background: linear-gradient(158deg, #f7f3ff 0%, #eae0ff 48%, #d9c9ff 100%);
-  color: #4b2f7a;
-}
-.tile-energy .art {
-  color: #6b46c1;
-}
-/* 电量低时角上多个红点 */
-.tile-energy.alert::before {
-  content: '';
-  position: absolute;
-  top: 10px;
-  right: 10px;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: #ef6b6b;
-  box-shadow: 0 0 0 3px rgba(239, 107, 107, .18);
-  z-index: 2;
-}
-html[data-theme='ink'] .tile-energy,
-html[data-theme='teal'] .tile-energy {
-  background: linear-gradient(158deg, rgba(154, 122, 255, .22) 0%, rgba(154, 122, 255, .11) 60%, rgba(154, 122, 255, .05) 100%);
-  color: #e6dcff;
-}
-html[data-theme='ink'] .tile-energy .art,
-html[data-theme='teal'] .tile-energy .art {
-  color: #b39bff;
-}
-
-/* 宿舍电量二级页 */
-.energy-card {
-  border-radius: 18px;
-  border: 1px solid var(--line);
-  background: var(--panel);
-  padding: 14px 14px 10px;
-}
-.energy-row {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 10px;
-}
-.e-item {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}
-.e-label {
-  font-size: 11.5px;
-  color: var(--dim);
-  letter-spacing: .04em;
-}
-.e-num {
-  font-size: 26px;
-  font-weight: 700;
-  line-height: 1.15;
-  font-variant-numeric: tabular-nums;
-}
-.e-num i {
-  font-style: normal;
-  font-size: 12px;
-  font-weight: 500;
-  margin-left: 3px;
-  opacity: .7;
-}
-.e-num.ok { color: #4ec9a0; }
-.e-num.warn { color: #e0b060; }
-.e-num.low { color: #ef6b6b; }
-.energy-meta {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 10px;
-  margin-top: 10px;
-  font-size: 11.5px;
-  color: var(--dim);
-}
-.energy-meta .warn {
-  color: #e0b060;
-  flex: 1 1 auto;
-  min-width: 0;
-  line-height: 1.5;
-}
-/* 「刷新」不能被长文案挤成两行 */
-.energy-meta .link,
-.energy-meta button {
-  flex: 0 0 auto;
-  white-space: nowrap;
-}
-.spark-wrap { margin: 2px -2px 0; color: var(--accent); }
-.spark { width: 100%; height: 64px; display: block; }
-.spark-foot {
-  margin-top: 2px;
-  font-size: 11px;
-  color: var(--dim);
-}
 .card .field {
   display: flex;
   align-items: center;
@@ -1217,37 +1119,3 @@ button.primary.wide {
 }
 
 /* 房间四级选择：下拉框跟输入框一个皮 */
-.picker {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin-top: 8px;
-}
-.picker .field > span {
-  flex: 0 0 42px;
-}
-.picker .field select {
-  flex: 1 1 auto;
-  min-width: 0;
-  border-radius: 12px;
-  border: 1px solid var(--line);
-  background: rgba(255, 255, 255, .04);
-  color: var(--text);
-  padding: 9px 11px;
-  font: 13.5px/1.4 inherit;
-  appearance: none;
-  -webkit-appearance: none;
-  background-image:
-    linear-gradient(45deg, transparent 50%, var(--dim) 50%),
-    linear-gradient(135deg, var(--dim) 50%, transparent 50%);
-  background-position: calc(100% - 18px) 17px, calc(100% - 13px) 17px;
-  background-size: 5px 5px, 5px 5px;
-  background-repeat: no-repeat;
-}
-.picker .field select:focus {
-  outline: none;
-  border-color: var(--accent);
-}
-html[data-theme='cream'] .picker .field select {
-  background-color: #fff;
-}

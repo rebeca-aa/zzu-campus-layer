@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import type { Course, Term } from '../src/core/types';
-import { parseRoom, type PlaceOption } from '../src/core/energy';
 
 export type TabKey = 'home' | 'ai' | 'schedule' | 'mine';
 
@@ -118,7 +117,7 @@ export function HomeView(props: {
   today: string;
   call: Caller;
   refreshKey: number;
-  onOpen: (kind: 'library' | 'rooms' | 'card' | 'energy') => void;
+  onOpen: (kind: 'library' | 'rooms' | 'card') => void;
   onSchedule: () => void;
   onNotice: () => void;
   onBell: () => void;
@@ -126,8 +125,6 @@ export function HomeView(props: {
   onRefresh: () => void;
   busy: boolean;
   /** 宿舍电量：卡片上那句话 + 配色档位 */
-  energyText: string;
-  energyLevel: 'ok' | 'warn' | 'low' | 'none';
 }) {
   const { today, call, refreshKey } = props;
   /* 上次打开时的结果：先铺出来，网络回来再覆盖，省得白屏等 */
@@ -333,17 +330,6 @@ export function HomeView(props: {
             </span>
             <div class="t">校园卡</div>
             <div class="s">{needLogin ? '登录后看' : tiles.card?.text ?? '…'}</div>
-          </button>
-          <button class={`tile tile-energy${props.energyLevel === 'low' ? ' alert' : ''}`} onClick={() => props.onOpen('energy')}>
-            <span class="art" aria-hidden="true">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M13 3 5 13.5h5.5L10 21l8-10.5h-5.5z" />
-              </svg>
-            </span>
-            <div class="t">宿舍电量</div>
-            <div class={`s ${props.energyLevel === 'low' ? 'low' : props.energyLevel === 'warn' ? 'warn' : props.energyLevel === 'ok' ? 'ok' : ''}`}>
-              {props.energyText}
-            </div>
           </button>
         </div>
 
@@ -619,295 +605,6 @@ export function ScheduleView(props: {
 
 /* ---------------- 宿舍电量 ---------------- */
 
-export interface EnergyPointView {
-  d: string;
-  light?: number;
-  ac?: number;
-}
-
-/** 10/31 11:57 这种，不带年份 */
-function fmtWhen(iso: string): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return '';
-  const p = (n: number) => String(n).padStart(2, '0');
-  return `${d.getMonth() + 1}/${d.getDate()} ${p(d.getHours())}:${p(d.getMinutes())}`;
-}
-
-function Spark({ points, pick }: { points: EnergyPointView[]; pick: (p: EnergyPointView) => number | undefined }) {  const values = points.map(pick).filter((v): v is number => typeof v === 'number');
-  if (values.length < 2) return <p class="empty-line">再攒一天就能画曲线了</p>;
-  const W = 300;
-  const H = 64;
-  const max = Math.max(...values);
-  const min = Math.min(...values);
-  const span = Math.max(max - min, 1);
-  const step = W / (values.length - 1);
-  const path = values
-    .map((v, i) => `${i === 0 ? 'M' : 'L'}${(i * step).toFixed(1)},${(H - 3 - ((v - min) / span) * (H - 8)).toFixed(1)}`)
-    .join(' ');
-  const lastX = (values.length - 1) * step;
-  const lastY = H - 3 - ((values[values.length - 1]! - min) / span) * (H - 8);
-  return (
-    <svg class="spark" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" aria-hidden="true">
-      <path d={path} fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round" />
-      <circle cx={lastX.toFixed(1)} cy={lastY.toFixed(1)} r="2.6" fill="currentColor" />
-    </svg>
-  );
-}
-
-export function EnergyView(props: {
-  light?: number;
-  ac?: number;
-  at?: string;
-  lightRoom?: string;
-  acRoom?: string;
-  history: EnergyPointView[];
-  busy: boolean;
-  error?: string;
-  onRefresh: () => void;
-  onSave: (s: { lightRoom?: string; acRoom?: string }) => void;
-  onClose: () => void;
-  /** 第一次没填房间号、但自动认出来时给一句说明 */
-  hint?: string;
-  /** 拉下一级的房间列表（校区 → 楼 → 单元 → 房间） */
-  onFetchPlaces: (parentId: string) => Promise<PlaceOption[]>;
-  /** 再自动识别一次（失败后手点） */
-  onDetect: () => void;
-  /** 浏览器里跨域被拦、又没有壳的原生通道时给一句说明 */
-  unsupported?: boolean;
-}) {
-  const [lightRoom, setLightRoom] = useState(props.lightRoom ?? '');
-  const [acRoom, setAcRoom] = useState(props.acRoom ?? '');
-  const [editing, setEditing] = useState(!props.lightRoom && !props.acRoom);
-  useEffect(() => {
-    setLightRoom(props.lightRoom ?? '');
-    setAcRoom(props.acRoom ?? '');
-  }, [props.lightRoom, props.acRoom]);
-
-  const tone = (v?: number) => (v === undefined ? '' : v <= 8 ? 'low' : v <= 20 ? 'warn' : 'ok');
-  const last = props.history.slice(-30);
-
-  /* 从列表里选房间：校区 → 楼 → 单元 → 房间，一级一级往下点 */
-  const [picking, setPicking] = useState(false);
-  const [levels, setLevels] = useState<PlaceOption[][]>([]);
-  const [path, setPath] = useState<PlaceOption[]>([]);
-  const [placesBusy, setPlacesBusy] = useState(false);
-  const [placesError, setPlacesError] = useState('');
-
-  const startPicking = async () => {
-    setPicking(true);
-    setPath([]);
-    setLevels([]);
-    setPlacesBusy(true);
-    setPlacesError('');
-    try {
-      setLevels([await props.onFetchPlaces('')]);
-    } catch (err) {
-      setPlacesError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setPlacesBusy(false);
-    }
-  };
-
-  const pickLevel = async (index: number, option: PlaceOption) => {
-    /* 选中项本身就是完整房间号（99-1--2-101）→ 到底了，直接存下并读数 */
-    if (parseRoom(option.id)) {
-      setPath([...path.slice(0, index), option]);
-      setLightRoom(option.id);
-      setPicking(false);
-      setPath([]);
-      setLevels([]);
-      setEditing(false);
-      props.onSave({ lightRoom: option.id, ...(acRoom.trim() ? { acRoom: acRoom.trim() } : {}) });
-      return;
-    }
-    const nextPath = [...path.slice(0, index), option];
-    setPath(nextPath);
-    setPlacesBusy(true);
-    setPlacesError('');
-    try {
-      const children = await props.onFetchPlaces(option.id);
-      setLevels([...levels.slice(0, index + 1), children]);
-    } catch (err) {
-      setPlacesError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setPlacesBusy(false);
-    }
-  };
-
-  return (
-    <div class="tabbody">
-      <div class="energy-card">
-        <div class="energy-row">
-          <div class="e-item">
-            <span class="e-label">照明</span>
-            <span class={`e-num ${tone(props.light)}`}>
-              {props.light === undefined ? '—' : props.light.toFixed(1)}
-              <i>度</i>
-            </span>
-          </div>
-          <div class="e-item">
-            <span class="e-label">空调</span>
-            <span class={`e-num ${tone(props.ac)}`}>
-              {props.ac === undefined ? '—' : props.ac.toFixed(1)}
-              <i>度</i>
-            </span>
-          </div>
-        </div>
-        <div class="energy-meta">
-          {props.error ? (
-            <span class="warn">{props.error}</span>
-          ) : props.at ? (
-            <span>更新于 {fmtWhen(props.at)}</span>
-          ) : (
-            <span>还没读过</span>
-          )}
-          <button class="mini" onClick={props.onRefresh} disabled={props.busy}>
-            {props.busy ? '读数中…' : '刷新'}
-          </button>
-        </div>
-      </div>
-
-      {props.hint && <p class="hint">{props.hint}</p>}
-
-      {props.unsupported && (
-        <p class="hint warn">
-          浏览器里读不到一卡通：那几个接口不带跨域许可，网页发的请求会被浏览器直接拦掉（就是刚才那个 Failed to
-          fetch）。在电脑上装扩展、点「宿舍电量」所在的面板才读得到；手机端要等我给安卓壳加上原生通道。
-        </p>
-      )}
-
-      {(props.light !== undefined || last.length > 1) && (
-        <div class="card">
-          <div class="cardhead">
-            <strong>最近 30 天</strong>
-            <span>照明</span>
-          </div>
-          <div class="spark-wrap">
-            <Spark points={last} pick={(p) => p.light} />
-          </div>
-          {last.length > 1 && (
-            <div class="cardhead spark-foot">
-              <span>{last[0]?.d.slice(5)}</span>
-              <span>{last[last.length - 1]?.d.slice(5)}</span>
-            </div>
-          )}
-        </div>
-      )}
-
-      <div class="card">
-        <div class="cardhead">
-          <strong>房间号</strong>
-          <button class="mini" onClick={() => setEditing((v) => !v)}>
-            {editing ? '收起' : '改'}
-          </button>
-        </div>
-        {!editing ? (
-          <p class="hint">
-            {props.lightRoom || '未设置'}
-            {props.acRoom ? ` · 空调 ${props.acRoom}` : ''}
-          </p>
-        ) : (
-          <>
-            <p class="hint">
-              不用手抄房间号：点「从列表里选」往下点两下就行。也可以直接填，
-              形如 <code>99-1--1-101</code>；照明和空调是两块表，没有空调就留空。
-            </p>
-            {picking ? (
-              <PlacePicker
-                levels={levels}
-                path={path}
-                loading={placesBusy}
-                {...(placesError ? { error: placesError } : {})}
-                onPick={(index, option) => void pickLevel(index, option)}
-                onCancel={() => {
-                  setPicking(false);
-                  setPath([]);
-                  setLevels([]);
-                }}
-              />
-            ) : (
-              <>
-                <label class="field">
-                  <span>照明</span>
-                  <input
-                    value={lightRoom}
-                    placeholder="99-1--1-101"
-                    onInput={(e) => setLightRoom((e.target as HTMLInputElement).value)}
-                  />
-                </label>
-                <label class="field">
-                  <span>空调</span>
-                  <input
-                    value={acRoom}
-                    placeholder="留空表示没有空调表"
-                    onInput={(e) => setAcRoom((e.target as HTMLInputElement).value)}
-                  />
-                </label>
-                <button class="ghost wide" onClick={() => void startPicking()}>
-                  从列表里选
-                </button>
-                <button class="ghost wide" onClick={props.onDetect} disabled={props.busy}>
-                  再自动识别一次
-                </button>
-              </>
-            )}
-            <button
-              class="primary wide"
-              onClick={() => {
-                props.onSave({ ...(lightRoom.trim() ? { lightRoom: lightRoom.trim() } : {}), ...(acRoom.trim() ? { acRoom: acRoom.trim() } : {}) });
-                setEditing(false);
-              }}
-            >
-              保存并读数
-            </button>
-          </>
-        )}
-      </div>
-
-      <p class="hint">低于 20 度变黄、8 度变红；每天第一次打开会记一个点，画的就是它。</p>
-    </div>
-  );
-}
-
-/* 房间四级选择：一个层级一个下拉，选到底就当作房间 */
-function PlacePicker(props: {
-  levels: PlaceOption[][];
-  path: PlaceOption[];
-  loading: boolean;
-  error?: string;
-  onPick: (index: number, option: PlaceOption) => void;
-  onCancel: () => void;
-}) {
-  return (
-    <div class="picker">
-      {props.levels.map((options, index) => (
-        <label class="field" key={index}>
-          <span>{['校区', '楼', '单元', '房间'][index] ?? `第 ${index + 1} 级`}</span>
-          <select
-            value={props.path[index]?.id ?? ''}
-            onChange={(e) => {
-              const id = (e.target as HTMLSelectElement).value;
-              const hit = options.find((o) => o.id === id);
-              if (hit) props.onPick(index, hit);
-            }}
-          >
-            <option value="">选择…</option>
-            {options.map((option) => (
-              <option key={option.id} value={option.id}>
-                {option.name}
-              </option>
-            ))}
-          </select>
-        </label>
-      ))}
-      {props.loading && <p class="hint">读取中…</p>}
-      {props.error && <p class="hint warn">{props.error}</p>}
-      <button class="ghost wide" onClick={props.onCancel}>
-        改回手动填
-      </button>
-    </div>
-  );
-}
 
 /* ---------------- 我的 ---------------- */
 

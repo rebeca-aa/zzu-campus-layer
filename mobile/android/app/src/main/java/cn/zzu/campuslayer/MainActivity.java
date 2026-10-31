@@ -83,8 +83,6 @@ public class MainActivity extends Activity {
         } catch (Exception ignored) {
         }
         web.addJavascriptInterface(new NotifyBridge(), "CampusNotify");
-        /* 一卡通那几个接口不带 CORS，网页里发不出去，走壳的原生请求（CampusNet.http）。 */
-        web.addJavascriptInterface(new CampusNet(), "CampusNet");
 
         CrashLog.install(this);
 
