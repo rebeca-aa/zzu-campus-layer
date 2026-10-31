@@ -472,7 +472,7 @@ header.top .acts {
   left: 0;
   right: 0;
   bottom: 0;
-  z-index: 20;
+  z-index: 40;
   height: calc(var(--nav-h) + env(safe-area-inset-bottom));
   padding-bottom: env(safe-area-inset-bottom);
   display: grid;
@@ -613,12 +613,12 @@ header.top .acts {
 .subpage {
   position: absolute;
   inset: 0;
-  z-index: 15;
+  z-index: 30;
   background: var(--bg);
   display: flex;
   flex-direction: column;
   overflow-y: auto;
-  padding: calc(env(safe-area-inset-top) + 10px) 16px calc(env(safe-area-inset-bottom) + 20px);
+  padding: calc(env(safe-area-inset-top) + 10px) 16px calc(var(--nav-h) + env(safe-area-inset-bottom) + 16px);
   scrollbar-width: none;
 }
 .subpage::-webkit-scrollbar {
@@ -714,6 +714,16 @@ header.top .acts {
   min-width: 0;
 }
 
+/* 点刷新时图标转起来，不然看着像没反应 */
+.iconbtn.spin svg {
+  animation: icon-spin 0.9s linear infinite;
+}
+@keyframes icon-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 /* 更新提示 / 更新公告：居中小卡片 + 半透明遮罩 */
 .dialog-wrap {
   position: fixed;
@@ -783,5 +793,12 @@ header.top .acts {
 }
 .dialog .d-actions .ghost {
   color: var(--dim);
+}
+
+
+
+/* 二级页里 NoticeBoard 自己那行标题与上面的返回条重复，只留未读数与刷新 */
+.subpage .nb-head .nb-head-title {
+  display: none;
 }
 

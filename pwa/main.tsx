@@ -110,6 +110,8 @@ function App() {
   const [updateReady, setUpdateReady] = useState(false);
   const [updateNotes, setUpdateNotes] = useState<string[]>([]);
   const [announce, setAnnounce] = useState<Release | null>(null);
+  /* 打开通知前在哪一栏，关掉时回那一栏（不是回 AI） */
+  const [noticeFrom, setNoticeFrom] = useState<TabKey>('home');
   const swReg = useRef<ServiceWorkerRegistration | null>(null);
   const [sheet, setSheet] = useState<'none' | 'login'>('none');
   /* 面板切换方向：fwd = 新面板从右边滑进来，back = 退回时从左边滑回来 */
@@ -254,7 +256,7 @@ const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
     try {
       let session = await loadSession();
       if (!session.jwxtToken && !session.portalToken) {
-        setNoticeError('还没有登录态：点右上角「登录态」导入一次。');
+        setNoticeError('还没登录：去「我的 → 账号」登录一次，通知就会出来。');
         return;
       }
       const out = await runTool('find_notices', { limit: 50 }, new CampusService(session));
@@ -380,7 +382,7 @@ const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
         setMessages((m) =>
           trimTranscript([
             ...m,
-            { role: 'assistant', text: '还没有登录态：点右上角「登录态」，从电脑上的扩展面板复制一段码粘进来。', error: true },
+            { role: 'assistant', text: '还没登录：去「我的 → 账号」登录一次（电脑上也可以用扩展面板复制的码导入），然后再问我。', error: true },
           ]),
         );
         setNavDir('fwd');
@@ -719,11 +721,13 @@ const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
     };
   }, [homeRefresh]);
 
+  /* 主页那个刷新：重拉今天的课、图书馆余量、空教室、余额、最新通知，顺带刷一次登录态 */
   const refreshHome = useCallback(() => {
     setHomeBusy(true);
     setHomeRefresh((n) => n + 1);
     void tokenStatuses().then(setStatuses);
-    window.setTimeout(() => setHomeBusy(false), 800);
+    void refresh();
+    window.setTimeout(() => setHomeBusy(false), 1200);
   }, []);
 
   const themeLabel = theme === 'cream' ? '米白' : theme === 'teal' ? '蓝绿' : '藏青';
@@ -766,9 +770,20 @@ const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
   }, []);
 
   const unread = noticeCards.filter((c) => !noticePrefs.readIds.includes(c.id)).length;
+
+  /* 通知是盖在当前页上的二级页：再点一次铃铛就收起来，回来还是原来那一栏 */
+  const closeNotices = (dir: 'fwd' | 'back' = 'back') => {
+    setNavDir(dir);
+    setView('chat');
+    setTab(noticeFrom);
+  };
   const openNotices = () => {
+    if (view === 'notices') {
+      closeNotices();
+      return;
+    }
+    setNoticeFrom(tab);
     setNavDir('fwd');
-    setTab('ai');
     setView('notices');
     if (noticeCards.length === 0 && !noticeBusy) void loadNotices();
   };
@@ -858,15 +873,6 @@ const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
           <div class="who">
             <h1>AI</h1>
             <div class="sub">问课表、空教室、图书馆、校园卡</div>
-          </div>
-          <div class="acts">
-            <button class="iconbtn" onClick={openNotices} aria-label="通知">
-              {unread > 0 && <span class="dot">{unread > 99 ? '99+' : unread}</span>}
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M18 8a6 6 0 1 0-12 0c0 5-2 6-2 6h16s-2-1-2-6" />
-                <path d="M13.7 17a2 2 0 0 1-3.4 0" />
-              </svg>
-            </button>
           </div>
         </header>
       )}
@@ -1043,8 +1049,7 @@ const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
           <div class="subhead">
             <button
               onClick={() => {
-                setNavDir('back');
-                setView('chat');
+                closeNotices();
               }}
             >
               ‹ 返回

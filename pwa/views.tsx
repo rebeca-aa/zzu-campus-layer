@@ -178,7 +178,12 @@ export function HomeView(props: {
             {props.unread > 0 && <span class="dot">{props.unread > 99 ? '99+' : props.unread}</span>}
             <BellIcon />
           </button>
-          <button class="iconbtn" onClick={props.onRefresh} aria-label="刷新" disabled={props.busy}>
+          <button
+            class={`iconbtn${props.busy ? ' spin' : ''}`}
+            onClick={props.onRefresh}
+            aria-label="刷新"
+            disabled={props.busy}
+          >
             <RefreshIcon />
           </button>
         </div>
