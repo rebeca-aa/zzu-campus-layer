@@ -453,3 +453,22 @@ mobile/android/      安卓壳（Gradle，零第三方依赖）
 1. 别提交任何 token、`sk-` key、学号姓名、未脱敏的原始响应。
 2. 新增能力前先读 [docs/portal-services-inventory.md](docs/portal-services-inventory.md)——哪些服务现实中接不上、为什么。
 3. 跑一遍 `npm run verify`；能动 UI 的话再跑 `npm run e2e` 与 `npm run pwa:shot`。
+
+## 致谢
+
+这个项目能立起来，靠的是前面这些人把学校的接口摸清楚并开源出来——学校的接口没有文档，没有他们就得一个个试。
+
+**校园数据接口**
+
+| 项目 | 作者 | 许可 | 用在哪 |
+|---|---|---|---|
+| [ZZU.Py](https://github.com/Illustar0/ZZU.Py) | Illustar0 | MIT | 一卡通、教务接口的 Python 实现；宿舍电量的协议（host/open → getToken → utilities/account）照它写的 |
+| [ZZU-Electricity](https://github.com/TorCroft/ZZU-Electricity) | TorCroft | MIT | 电量监控与「低于阈值提醒」的做法参考 |
+| [ZZU-Electricity-Monitor](https://github.com/Elykia093/ZZU-Electricity-Monitor) | Elykia093 | MIT | 照明 / 空调分表、房间号编码格式（99-1--1-101） |
+| [ZZU-Dorm-Electricity-Balance-Base](https://github.com/rimrose/ZZU-Dorm-Electricity-Balance-Base) | rimrose | MIT | 余额曲线的呈现方式 |
+
+**技术栈**
+
+[Preact](https://preactjs.com)（Jason Miller 与贡献者，MIT）· [Zod](https://zod.dev)（Colin McDonnell，MIT）· [Vite](https://vite.dev)（Evan You 与 Vite 团队，MIT）· [TypeScript](https://www.typescriptlang.org)（Microsoft，Apache-2.0）· [Vitest](https://vitest.dev)（Anthony Fu 等，MIT）· [DefinitelyTyped](https://github.com/DefinitelyTyped/DefinitelyTyped)（社区，MIT）
+
+各项目的许可与版权归各位作者所有。App 里「我的 → 关于 → 开源与致谢」也列了同一份名单。

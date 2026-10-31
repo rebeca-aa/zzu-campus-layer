@@ -11,15 +11,21 @@ export interface ReminderBlock {
 /** 提前多少分钟提醒：每节课开课前 30 分钟各弹一条。 */
 export const LEAD_MIN = 30;
 
+/**
+ * 默认往后排多少天。
+ *
+ * 原来是 7 天：只要有一周没打开 App，后面就再也没有闹钟了——这正是「有时候不通知」
+ * 的主要原因之一。排 14 天，间隔一周再打开也接得上；闹钟条数最多也就几十个，
+ * Android 那边（AlarmManager）完全吃得下。
+ */
+export const REMIND_DAYS = 14;
+
+/** 已经进了 30 分钟窗口但课还没开始时，多久后补弹（秒级，别等下一轮）。 */
+const CATCH_UP_MS = 5_000;
+
 function hhmmToMin(v: string): number {
   const [h, m] = v.split(':');
   return Number(h) * 60 + Number(m);
-}
-
-function minToHhmm(min: number): string {
-  const h = Math.floor(min / 60);
-  const m = min % 60;
-  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
 }
 
 /** 上海时区某天某时刻的绝对时间戳。 */
@@ -37,9 +43,12 @@ function inWeek(course: Course, weekIndex: number): boolean {
   return weeks.length === 0 || weeks.includes(weekIndex);
 }
 
-/** 通知标题：一节课一条，标题直接说是哪门课。 */
-function titleOf(course: Course): string {
-  return `半小时后：${course.name}`;
+/** 通知标题：一节课一条，标题直接说是哪门课。remainMs 是「离上课还有多久」。 */
+function titleOf(course: Course, remainMs: number): string {
+  const min = Math.max(1, Math.round(remainMs / 60_000));
+  /* 正常提前量（≥25 分钟）就说「半小时后」，晚开 App 补的那条要说实话 */
+  if (min >= LEAD_MIN - 5) return `半小时后：${course.name}`;
+  return `${min} 分钟后：${course.name}`;
 }
 
 /** 通知正文：时间段 + 第几节 + 地点 + 老师。 */
@@ -59,14 +68,15 @@ function bodyOf(course: Course): string {
  * 之前是把「同一半天、空档 ≤40 分钟的连堂课」并成一条 —— 上午满课时整上午只在
  * 第一节前弹一次，第二节课就没有提醒了；现在每节课各自独立。
  *
- * 过点的课不补弹（`at` 已经过去的直接丢），避免一开 App 就糊一脸旧通知。
+ * 已经开课的课不排（避免一开 App 就糊一脸旧通知）；但**还没开课、却已经进了 30 分钟
+ * 窗口**的课（晚开 App 的典型情况）会补一条「N 分钟后：xxx」，不会白白丢掉。
  */
 export function buildReminderBlocks(
   courses: Course[],
   opts: { now?: Date; days?: number; termStart?: string } = {},
 ): ReminderBlock[] {
   const now = opts.now ?? new Date();
-  const days = opts.days ?? 7;
+  const days = opts.days ?? REMIND_DAYS;
   const termStart = opts.termStart;
   const nowMs = now.getTime();
   const today = todayShanghai(nowMs);
@@ -85,15 +95,17 @@ export function buildReminderBlocks(
       .sort((a, b) => hhmmToMin(a.startTime) - hhmmToMin(b.startTime));
 
     for (const course of list) {
-      const startMin = hhmmToMin(course.startTime);
-      const atMs = at(date, minToHhmm(Math.max(startMin - LEAD_MIN, 0)));
-      if (atMs <= nowMs) continue; // 已经过点，不补弹
+      const startMs = at(date, course.startTime);
+      if (startMs <= nowMs) continue; // 已经开课了，不补弹
+      const leadMs = startMs - LEAD_MIN * 60_000;
+      /* 正常情况按「开课前 30 分钟」；已经进了这个窗口（晚开 App）就立刻补一条 */
+      const fireMs = leadMs > nowMs ? leadMs : nowMs + CATCH_UP_MS;
 
       const key = `${date}|${course.startTime}|${course.name}`;
       if (seen.has(key)) continue;
       seen.add(key);
 
-      out.push({ at: atMs, title: titleOf(course), body: bodyOf(course) });
+      out.push({ at: fireMs, title: titleOf(course, startMs - fireMs), body: bodyOf(course) });
     }
   }
 

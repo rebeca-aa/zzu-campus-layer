@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { LEAD_MIN, buildReminderBlocks } from '../src/core/remind';
+import { LEAD_MIN, REMIND_DAYS, buildReminderBlocks } from '../src/core/remind';
 import type { Course } from '../src/core/types';
 
 function course(p: Partial<Course> & { name: string; weekday: number; startTime: string; endTime: string }): Course {
@@ -40,7 +40,7 @@ describe('课前提醒', () => {
           sectionEnd: 4,
         }),
       ],
-      { now: NOW },
+      { days: 1, now: NOW },
     );
     expect(blocks).toHaveLength(1);
     expect(blocks[0]!.at).toBe(at('09:40'));
@@ -55,7 +55,7 @@ describe('课前提醒', () => {
         course({ name: '微积分A', weekday: WED, startTime: '08:00', endTime: '09:40', location: '物_505' }),
         course({ name: '大学英语', weekday: WED, startTime: '10:10', endTime: '11:50', location: '北3_403' }),
       ],
-      { now: NOW },
+      { days: 1, now: NOW },
     );
     expect(blocks).toHaveLength(2);
     expect(blocks[0]!.at).toBe(at('07:30'));
@@ -95,7 +95,7 @@ describe('课前提醒', () => {
         course({ ...base, key: 'portal:1', source: 'portal' }),
         course({ ...base, key: 'jwxt:2', source: 'jwxt' }),
       ],
-      { now: NOW },
+      { days: 1, now: NOW },
     );
     expect(blocks).toHaveLength(1);
   });
@@ -106,7 +106,7 @@ describe('课前提醒', () => {
         course({ name: '早课', weekday: WED, startTime: '08:00', endTime: '09:40' }),
         course({ name: '第二节', weekday: WED, startTime: '10:10', endTime: '11:50' }),
       ],
-      { now: new Date('2026-10-21T09:00:00+08:00') },
+      { days: 1, now: new Date('2026-10-21T09:00:00+08:00') },
     );
     expect(blocks).toHaveLength(1);
     expect(blocks[0]!.title).toContain('第二节');
@@ -133,5 +133,46 @@ describe('课前提醒', () => {
     expect(two).toHaveLength(2);
     expect(two[0]!.at).toBe(at('07:30'));
     expect(two[1]!.at).toBe(new Date('2026-10-22T07:30:00+08:00').getTime());
+  });
+
+  it('晚开 App 也不会漏：已经进了 30 分钟窗口就立刻补一条，标题说实话', () => {
+    // 07:50 才打开，08:00 的课（正常提醒点 07:30 已过）
+    const late = new Date('2026-10-21T07:50:00+08:00');
+    const blocks = buildReminderBlocks(
+      [course({ name: '早课', weekday: WED, startTime: '08:00', endTime: '09:40' })],
+      { now: late, days: 1 },
+    );
+    expect(blocks).toHaveLength(1);
+    /* 立刻补（5 秒后），而不是丢掉 */
+    expect(blocks[0]!.at).toBe(late.getTime() + 5_000);
+    expect(blocks[0]!.title).toContain('10 分钟后');
+    expect(blocks[0]!.title).toContain('早课');
+  });
+
+  it('已经开课的仍然不补（08:05 时 08:00 的课没有）', () => {
+    const blocks = buildReminderBlocks(
+      [course({ name: '早课', weekday: WED, startTime: '08:00', endTime: '09:40' })],
+      { now: new Date('2026-10-21T08:05:00+08:00'), days: 1 },
+    );
+    expect(blocks).toHaveLength(0);
+  });
+
+  it('正常提前量下标题还是「半小时后」', () => {
+    const blocks = buildReminderBlocks(
+      [course({ name: '早课', weekday: WED, startTime: '08:00', endTime: '09:40' })],
+      { now: NOW, days: 1 },
+    );
+    expect(blocks[0]!.title).toBe('半小时后：早课');
+  });
+
+  it('默认往后排 14 天：一周以上没打开 App 也接得上', () => {
+    expect(REMIND_DAYS).toBe(14);
+    const blocks = buildReminderBlocks(
+      [course({ name: '周课', weekday: WED, startTime: '08:00', endTime: '09:40' })],
+      { now: NOW },
+    );
+    // 14 天里含两个周三（10-21、10-28）
+    expect(blocks).toHaveLength(2);
+    expect(blocks[1]!.at).toBe(new Date('2026-10-28T07:30:00+08:00').getTime());
   });
 });

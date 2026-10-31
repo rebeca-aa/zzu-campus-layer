@@ -1,4 +1,4 @@
-﻿/* ---------- 底部四栏 + 四页框架 ---------- */
+/* ---------- 底部四栏 + 四页框架 ---------- */
 
 :root {
   --nav-h: 58px;
@@ -253,7 +253,7 @@ header.top .acts {
 /* 主页：三个入口（浅色卡片 + 小图标，三种配色各不一样） */
 .tiles {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(2, 1fr);
   gap: 10px;
 }
 .tile {
@@ -327,6 +327,9 @@ header.top .acts {
 .tile .s.warn {
   color: #a4611a;
 }
+.tile .s.low {
+  color: #b4342f;
+}
 
 /* 图书馆：薄荷绿 */
 .tile-lib {
@@ -351,6 +354,84 @@ header.top .acts {
 }
 .tile-card .art {
   color: #b45309;
+}
+
+/* 深色两套配色里，三块浅色纸太扎眼：改成「暗色玻璃 + 一点颜色」 */
+html[data-theme='ink'] .tile,
+html[data-theme='teal'] .tile {
+  border-color: rgba(255, 255, 255, .10);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, .45), inset 0 1px 0 rgba(255, 255, 255, .04);
+}
+html[data-theme='ink'] .tile::after,
+html[data-theme='teal'] .tile::after {
+  background: radial-gradient(circle at 35% 35%, rgba(255, 255, 255, .07), rgba(255, 255, 255, 0) 68%);
+}
+html[data-theme='ink'] .tile .art,
+html[data-theme='teal'] .tile .art {
+  background: rgba(255, 255, 255, .10);
+  box-shadow: none;
+}
+html[data-theme='ink'] .tile .t,
+html[data-theme='teal'] .tile .t {
+  opacity: .66;
+}
+html[data-theme='ink'] .tile .s.ok,
+html[data-theme='teal'] .tile .s.ok {
+  color: #6ee7a8;
+}
+html[data-theme='ink'] .tile .s.warn,
+html[data-theme='teal'] .tile .s.warn {
+  color: #f0c07a;
+}
+html[data-theme='ink'] .tile .s.low,
+html[data-theme='teal'] .tile .s.low {
+  color: #ff9a94;
+}
+
+/* 藏青 */
+html[data-theme='ink'] .tile-lib {
+  background: linear-gradient(158deg, rgba(61, 220, 132, .20) 0%, rgba(61, 220, 132, .10) 60%, rgba(61, 220, 132, .05) 100%);
+  color: #d9f8e7;
+}
+html[data-theme='ink'] .tile-lib .art {
+  color: #63e6a3;
+}
+html[data-theme='ink'] .tile-room {
+  background: linear-gradient(158deg, rgba(76, 141, 255, .22) 0%, rgba(76, 141, 255, .11) 60%, rgba(76, 141, 255, .05) 100%);
+  color: #dde9ff;
+}
+html[data-theme='ink'] .tile-room .art {
+  color: #8fb6ff;
+}
+html[data-theme='ink'] .tile-card {
+  background: linear-gradient(158deg, rgba(224, 176, 96, .20) 0%, rgba(224, 176, 96, .10) 60%, rgba(224, 176, 96, .05) 100%);
+  color: #ffe9c7;
+}
+html[data-theme='ink'] .tile-card .art {
+  color: #e8bd7a;
+}
+
+/* 蓝绿 */
+html[data-theme='teal'] .tile-lib {
+  background: linear-gradient(158deg, rgba(78, 201, 160, .20) 0%, rgba(78, 201, 160, .10) 60%, rgba(78, 201, 160, .05) 100%);
+  color: #d6f6ea;
+}
+html[data-theme='teal'] .tile-lib .art {
+  color: #5fd7b4;
+}
+html[data-theme='teal'] .tile-room {
+  background: linear-gradient(158deg, rgba(64, 152, 235, .22) 0%, rgba(64, 152, 235, .11) 60%, rgba(64, 152, 235, .05) 100%);
+  color: #d3f5f0;
+}
+html[data-theme='teal'] .tile-room .art {
+  color: #57d9c7;
+}
+html[data-theme='teal'] .tile-card {
+  background: linear-gradient(158deg, rgba(240, 190, 110, .22) 0%, rgba(240, 190, 110, .11) 60%, rgba(240, 190, 110, .05) 100%);
+  color: #ffe9c7;
+}
+html[data-theme='teal'] .tile-card .art {
+  color: #e6bb75;
 }
 
 /* 主页：最新一条通知 */
@@ -953,3 +1034,173 @@ header.top .acts {
 /* 拖动时顶部预览的目标周次 */
 .weekbar b.preview { color: var(--accent); }
 
+
+/* 账号二级页里的粘贴框：原来的 textarea 样式是给旧面板写的 */
+.subpage .tabbody textarea {
+  width: 100%;
+  min-height: 92px;
+  border-radius: 14px;
+  border: 1px solid var(--hairline, var(--line));
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text);
+  padding: 11px 12px;
+  font: 13px/1.5 ui-monospace, Menlo, Consolas, monospace;
+  resize: vertical;
+}
+
+
+/* 我的页「检查更新」那行的小红点 */
+.mine-row .t { position: relative; }
+.mine-row .t .dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-left: 6px;
+  border-radius: 50%;
+  background: #ef6b6b;
+  vertical-align: 2px;
+}
+
+
+/* 宿舍电量：淡紫（米白） */
+.tile-energy {
+  background: linear-gradient(158deg, #f7f3ff 0%, #eae0ff 48%, #d9c9ff 100%);
+  color: #4b2f7a;
+}
+.tile-energy .art {
+  color: #6b46c1;
+}
+/* 电量低时角上多个红点 */
+.tile-energy.alert::before {
+  content: '';
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #ef6b6b;
+  box-shadow: 0 0 0 3px rgba(239, 107, 107, .18);
+  z-index: 2;
+}
+html[data-theme='ink'] .tile-energy,
+html[data-theme='teal'] .tile-energy {
+  background: linear-gradient(158deg, rgba(154, 122, 255, .22) 0%, rgba(154, 122, 255, .11) 60%, rgba(154, 122, 255, .05) 100%);
+  color: #e6dcff;
+}
+html[data-theme='ink'] .tile-energy .art,
+html[data-theme='teal'] .tile-energy .art {
+  color: #b39bff;
+}
+
+/* 宿舍电量二级页 */
+.energy-card {
+  border-radius: 18px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  padding: 14px 14px 10px;
+}
+.energy-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+.e-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.e-label {
+  font-size: 11.5px;
+  color: var(--dim);
+  letter-spacing: .04em;
+}
+.e-num {
+  font-size: 26px;
+  font-weight: 700;
+  line-height: 1.15;
+  font-variant-numeric: tabular-nums;
+}
+.e-num i {
+  font-style: normal;
+  font-size: 12px;
+  font-weight: 500;
+  margin-left: 3px;
+  opacity: .7;
+}
+.e-num.ok { color: #4ec9a0; }
+.e-num.warn { color: #e0b060; }
+.e-num.low { color: #ef6b6b; }
+.energy-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 10px;
+  font-size: 11.5px;
+  color: var(--dim);
+}
+.energy-meta .warn { color: #e0b060; }
+.spark-wrap { margin: 2px -2px 0; color: var(--accent); }
+.spark { width: 100%; height: 64px; display: block; }
+.spark-foot {
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--dim);
+}
+.card .field {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 8px;
+}
+.card .field > span {
+  flex: 0 0 42px;
+  font-size: 12.5px;
+  color: var(--dim);
+}
+.card .field input {
+  flex: 1 1 auto;
+  min-width: 0;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, .04);
+  color: var(--text);
+  padding: 9px 11px;
+  font: 13.5px/1.4 inherit;
+}
+.card .field input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+button.primary.wide {
+  width: 100%;
+  margin-top: 12px;
+  border-radius: 12px;
+  padding: 11px;
+  border: 0;
+  background: var(--accent);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+}
+/* 关于页的开源致谢：名称一行，作者/许可/说明另起一行 */
+.card.credit .about-row {
+  display: block;
+  padding: 11px 0;
+}
+.card.credit .about-row .k {
+  display: block;
+  width: auto;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 3px;
+}
+.card.credit .about-row .v {
+  display: block;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--dim);
+}

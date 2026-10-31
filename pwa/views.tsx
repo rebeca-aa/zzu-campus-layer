@@ -77,42 +77,77 @@ export function TabBar({ tab, onTab }: { tab: TabKey; onTab: (t: TabKey) => void
 
 type TileState = { text: string; tone?: 'ok' | 'warn' };
 
+/** 主页上次读到的东西，按天存一份，下次打开先铺出来再刷新 */
+interface HomeCache {
+  courses: Course[];
+  week: number | null;
+  tiles: Record<string, TileState>;
+  notice: { title: string; kind: string } | null;
+  at: number;
+}
+
+const homeCacheKey = (today: string) => `campus-layer:homeCache:${today}`;
+
+function readHomeCache(today: string): HomeCache | null {
+  try {
+    const raw = localStorage.getItem(homeCacheKey(today));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as HomeCache;
+    if (!parsed || !Array.isArray(parsed.courses)) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function writeHomeCache(today: string, data: HomeCache): void {
+  try {
+    localStorage.setItem(homeCacheKey(today), JSON.stringify(data));
+    /* 顺手清掉前一天的，别越攒越多 */
+    for (let i = localStorage.length - 1; i >= 0; i--) {
+      const key = localStorage.key(i);
+      if (key && key.startsWith('campus-layer:homeCache:') && key !== homeCacheKey(today)) localStorage.removeItem(key);
+    }
+  } catch {
+    /* 存不下就算了，不影响用 */
+  }
+}
+
 export function HomeView(props: {
   today: string;
   call: Caller;
   refreshKey: number;
-  onOpen: (kind: 'library' | 'rooms' | 'card') => void;
+  onOpen: (kind: 'library' | 'rooms' | 'card' | 'energy') => void;
   onSchedule: () => void;
   onNotice: () => void;
   onBell: () => void;
   unread: number;
   onRefresh: () => void;
   busy: boolean;
+  /** 宿舍电量：卡片上那句话 + 配色档位 */
+  energyText: string;
+  energyLevel: 'ok' | 'warn' | 'low' | 'none';
 }) {
   const { today, call, refreshKey } = props;
-  const [courses, setCourses] = useState<Course[] | null>(null);
-  const [week, setWeek] = useState<number | null>(null);
-  const [tiles, setTiles] = useState<Record<string, TileState>>({});
-  const [notice, setNotice] = useState<{ title: string; kind: string } | null>(null);
+  /* 上次打开时的结果：先铺出来，网络回来再覆盖，省得白屏等 */
+  const cached = useMemo(() => readHomeCache(today), [today]);
+  const [courses, setCourses] = useState<Course[] | null>(cached?.courses ?? null);
+  const [week, setWeek] = useState<number | null>(cached?.week ?? null);
+  const [tiles, setTiles] = useState<Record<string, TileState>>(cached?.tiles ?? {});
+  const [notice, setNotice] = useState<{ title: string; kind: string } | null>(cached?.notice ?? null);
   const [err, setErr] = useState('');
   const [needLogin, setNeedLogin] = useState(false);
 
   useEffect(() => {
     let alive = true;
     setErr('');
+    const authFail = (r: { ok: boolean; error?: string }) => !r.ok && /登录/.test(r.error ?? '');
+
+    /* 课表排在第一个、单独一条：它最快回来，回来就立刻渲染 */
     void (async () => {
-      const [sched, lib, rooms, card, news] = await Promise.all([
-        call('get_schedule', { day: 'today' }),
-        call('library_seats'),
-        call('find_free_room', { date: today, limit: 5 }),
-        call('get_card'),
-        call('find_notices', { limit: 1 }),
-      ]);
+      const sched = await call('get_schedule', { day: 'today' });
       if (!alive) return;
-
-      const authFail = [sched, lib, rooms, card, news].some((r) => !r.ok && /登录/.test(r.error ?? ''));
-      setNeedLogin(authFail);
-
+      if (authFail(sched)) setNeedLogin(true);
       if (sched.ok && sched.data) {
         const payload = (sched.data as any).data ?? sched.data;
         setCourses(Array.isArray(payload?.courses) ? payload.courses : []);
@@ -121,43 +156,62 @@ export function HomeView(props: {
         setCourses([]);
         setErr(sched.error ?? '');
       }
-
-      const next: Record<string, TileState> = {};
-      if (lib.ok) {
-        const p = ((lib.data as any)?.data ?? lib.data) as { premises?: { name?: string; free?: number }[] } | undefined;
-        const first = p?.premises?.[0];
-        next.library = first
-          ? { text: `${shortName(first.name) ?? '图书馆'} 剩 ${first.free ?? 0}`, tone: (first.free ?? 0) > 0 ? 'ok' : 'warn' }
-          : { text: '查不到余量' };
-      } else {
-        next.library = { text: '点开看' };
-      }
-      if (rooms.ok) {
-        const n = Number(((rooms.data as any)?.data ?? rooms.data)?.count ?? 0);
-        next.rooms = { text: n > 0 ? `${n} 间空着` : '暂时没有' };
-      } else {
-        next.rooms = { text: '点开看' };
-      }
-      if (card.ok) {
-        const bal = ((card.data as any)?.data ?? card.data)?.balance;
-        next.card = { text: bal === undefined ? '看余额' : `¥ ${Number(bal).toFixed(2)}` };
-      } else {
-        next.card = { text: '看余额' };
-      }
-      setTiles(next);
-
-      if (news.ok) {
-        const list = ((news.data as any)?.data ?? news.data)?.cards as { title?: string; category?: string }[] | undefined;
-        const first = Array.isArray(list) ? list[0] : undefined;
-        setNotice(first?.title ? { title: first.title, kind: kindLabel(first.category) } : null);
-      } else {
-        setNotice(null);
-      }
     })();
+
+    /* 三个入口各自独立，谁先回来谁先更新 */
+    void (async () => {
+      const lib = await call('library_seats');
+      if (!alive) return;
+      if (authFail(lib)) setNeedLogin(true);
+      if (!lib.ok) {
+        setTiles((prev) => ({ ...prev, library: { text: '点开看' } }));
+        return;
+      }
+      const p = ((lib.data as any)?.data ?? lib.data) as { premises?: { name?: string; free?: number }[] } | undefined;
+      const first = p?.premises?.[0];
+      setTiles((prev) => ({
+        ...prev,
+        library: first
+          ? { text: `${shortName(first.name) ?? '图书馆'} 剩 ${first.free ?? 0}`, tone: (first.free ?? 0) > 0 ? 'ok' : 'warn' }
+          : { text: '查不到余量' },
+      }));
+    })();
+
+    void (async () => {
+      const rooms = await call('find_free_room', { date: today, limit: 5 });
+      if (!alive) return;
+      if (authFail(rooms)) setNeedLogin(true);
+      const n = rooms.ok ? Number(((rooms.data as any)?.data ?? rooms.data)?.count ?? 0) : -1;
+      setTiles((prev) => ({ ...prev, rooms: { text: n < 0 ? '点开看' : n > 0 ? `${n} 间空着` : '暂时没有' } }));
+    })();
+
+    void (async () => {
+      const card = await call('get_card');
+      if (!alive) return;
+      if (authFail(card)) setNeedLogin(true);
+      const bal = card.ok ? ((card.data as any)?.data ?? card.data)?.balance : undefined;
+      setTiles((prev) => ({ ...prev, card: { text: bal === undefined ? '看余额' : `¥ ${Number(bal).toFixed(2)}` } }));
+    })();
+
+    void (async () => {
+      const news = await call('find_notices', { limit: 1 });
+      if (!alive) return;
+      if (authFail(news)) setNeedLogin(true);
+      const list = ((news.data as any)?.data ?? news.data)?.cards as { title?: string; category?: string }[] | undefined;
+      const first = news.ok && Array.isArray(list) ? list[0] : undefined;
+      setNotice(first?.title ? { title: first.title, kind: kindLabel(first.category) } : null);
+    })();
+
     return () => {
       alive = false;
     };
   }, [refreshKey, today]);
+
+  /* 拿到新课表就落一份缓存，下次打开先铺它 */
+  useEffect(() => {
+    if (courses === null) return;
+    writeHomeCache(today, { courses, week, tiles, notice, at: Date.now() });
+  }, [courses, week, tiles, notice, today]);
 
   const nowMin = minutesOf(`${pad(new Date().getHours())}:${pad(new Date().getMinutes())}`);
   const list = courses ?? [];
@@ -194,7 +248,13 @@ export function HomeView(props: {
           <div class="cardhead">
             <strong>今日课表</strong>
             <span>
-              {needLogin ? '' : list.length ? `${list.length} 节 · ${new Set(list.map((c) => c.name)).size} 门` : '没有课'}
+              {needLogin
+                ? ''
+                : courses === null
+                  ? '读取中…'
+                  : list.length
+                    ? `${list.length} 节 · ${new Set(list.map((c) => c.name)).size} 门`
+                    : '没有课'}
             </span>
           </div>
           {needLogin ? (
@@ -202,7 +262,8 @@ export function HomeView(props: {
           ) : (
             <>
               {err && <p class="empty-line">{err}</p>}
-              {!err && list.length === 0 && <p class="empty-line">今天没有课，好好休息。</p>}
+              {!err && courses === null && <p class="empty-line">正在读课表…</p>}
+              {!err && courses !== null && list.length === 0 && <p class="empty-line">今天没有课，好好休息。</p>}
             </>
           )}
           <div class="lessons">
@@ -271,6 +332,17 @@ export function HomeView(props: {
             </span>
             <div class="t">校园卡</div>
             <div class="s">{needLogin ? '登录后看' : tiles.card?.text ?? '…'}</div>
+          </button>
+          <button class={`tile tile-energy${props.energyLevel === 'low' ? ' alert' : ''}`} onClick={() => props.onOpen('energy')}>
+            <span class="art" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M13 3 5 13.5h5.5L10 21l8-10.5h-5.5z" />
+              </svg>
+            </span>
+            <div class="t">宿舍电量</div>
+            <div class={`s ${props.energyLevel === 'low' ? 'low' : props.energyLevel === 'warn' ? 'warn' : props.energyLevel === 'ok' ? 'ok' : ''}`}>
+              {props.energyText}
+            </div>
           </button>
         </div>
 
@@ -544,6 +616,170 @@ export function ScheduleView(props: {
   );
 }
 
+/* ---------------- 宿舍电量 ---------------- */
+
+export interface EnergyPointView {
+  d: string;
+  light?: number;
+  ac?: number;
+}
+
+/** 10/31 11:57 这种，不带年份 */
+function fmtWhen(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${d.getMonth() + 1}/${d.getDate()} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+function Spark({ points, pick }: { points: EnergyPointView[]; pick: (p: EnergyPointView) => number | undefined }) {  const values = points.map(pick).filter((v): v is number => typeof v === 'number');
+  if (values.length < 2) return <p class="empty-line">再攒一天就能画曲线了</p>;
+  const W = 300;
+  const H = 64;
+  const max = Math.max(...values);
+  const min = Math.min(...values);
+  const span = Math.max(max - min, 1);
+  const step = W / (values.length - 1);
+  const path = values
+    .map((v, i) => `${i === 0 ? 'M' : 'L'}${(i * step).toFixed(1)},${(H - 3 - ((v - min) / span) * (H - 8)).toFixed(1)}`)
+    .join(' ');
+  const lastX = (values.length - 1) * step;
+  const lastY = H - 3 - ((values[values.length - 1]! - min) / span) * (H - 8);
+  return (
+    <svg class="spark" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" aria-hidden="true">
+      <path d={path} fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round" />
+      <circle cx={lastX.toFixed(1)} cy={lastY.toFixed(1)} r="2.6" fill="currentColor" />
+    </svg>
+  );
+}
+
+export function EnergyView(props: {
+  light?: number;
+  ac?: number;
+  at?: string;
+  lightRoom?: string;
+  acRoom?: string;
+  history: EnergyPointView[];
+  busy: boolean;
+  error?: string;
+  onRefresh: () => void;
+  onSave: (s: { lightRoom?: string; acRoom?: string }) => void;
+  onClose: () => void;
+}) {
+  const [lightRoom, setLightRoom] = useState(props.lightRoom ?? '');
+  const [acRoom, setAcRoom] = useState(props.acRoom ?? '');
+  const [editing, setEditing] = useState(!props.lightRoom && !props.acRoom);
+  useEffect(() => {
+    setLightRoom(props.lightRoom ?? '');
+    setAcRoom(props.acRoom ?? '');
+  }, [props.lightRoom, props.acRoom]);
+
+  const tone = (v?: number) => (v === undefined ? '' : v <= 8 ? 'low' : v <= 20 ? 'warn' : 'ok');
+  const last = props.history.slice(-30);
+
+  return (
+    <div class="tabbody">
+      <div class="energy-card">
+        <div class="energy-row">
+          <div class="e-item">
+            <span class="e-label">照明</span>
+            <span class={`e-num ${tone(props.light)}`}>
+              {props.light === undefined ? '—' : props.light.toFixed(1)}
+              <i>度</i>
+            </span>
+          </div>
+          <div class="e-item">
+            <span class="e-label">空调</span>
+            <span class={`e-num ${tone(props.ac)}`}>
+              {props.ac === undefined ? '—' : props.ac.toFixed(1)}
+              <i>度</i>
+            </span>
+          </div>
+        </div>
+        <div class="energy-meta">
+          {props.error ? (
+            <span class="warn">{props.error}</span>
+          ) : props.at ? (
+            <span>更新于 {fmtWhen(props.at)}</span>
+          ) : (
+            <span>还没读过</span>
+          )}
+          <button class="mini" onClick={props.onRefresh} disabled={props.busy}>
+            {props.busy ? '读数中…' : '刷新'}
+          </button>
+        </div>
+      </div>
+
+      {(props.light !== undefined || last.length > 1) && (
+        <div class="card">
+          <div class="cardhead">
+            <strong>最近 30 天</strong>
+            <span>照明</span>
+          </div>
+          <div class="spark-wrap">
+            <Spark points={last} pick={(p) => p.light} />
+          </div>
+          {last.length > 1 && (
+            <div class="cardhead spark-foot">
+              <span>{last[0]?.d.slice(5)}</span>
+              <span>{last[last.length - 1]?.d.slice(5)}</span>
+            </div>
+          )}
+        </div>
+      )}
+
+      <div class="card">
+        <div class="cardhead">
+          <strong>房间号</strong>
+          <button class="mini" onClick={() => setEditing((v) => !v)}>
+            {editing ? '收起' : '改'}
+          </button>
+        </div>
+        {!editing ? (
+          <p class="hint">
+            {props.lightRoom || '未设置'}
+            {props.acRoom ? ` · 空调 ${props.acRoom}` : ''}
+          </p>
+        ) : (
+          <>
+            <p class="hint">
+              从学校的电控页面或「房间查询」里复制，形如 <code>99-1--1-101</code>。照明和空调是两块表，房间号可能不同；
+              没有空调就留空。
+            </p>
+            <label class="field">
+              <span>照明</span>
+              <input
+                value={lightRoom}
+                placeholder="99-1--1-101"
+                onInput={(e) => setLightRoom((e.target as HTMLInputElement).value)}
+              />
+            </label>
+            <label class="field">
+              <span>空调</span>
+              <input
+                value={acRoom}
+                placeholder="留空表示没有空调表"
+                onInput={(e) => setAcRoom((e.target as HTMLInputElement).value)}
+              />
+            </label>
+            <button
+              class="primary wide"
+              onClick={() => {
+                props.onSave({ ...(lightRoom.trim() ? { lightRoom: lightRoom.trim() } : {}), ...(acRoom.trim() ? { acRoom: acRoom.trim() } : {}) });
+                setEditing(false);
+              }}
+            >
+              保存并读数
+            </button>
+          </>
+        )}
+      </div>
+
+      <p class="hint">低于 20 度变黄、8 度变红；每天第一次打开会记一个点，画的就是它。</p>
+    </div>
+  );
+}
+
 /* ---------------- 我的 ---------------- */
 
 export function MineView(props: {
@@ -562,6 +798,10 @@ export function MineView(props: {
   onTheme: () => void;
   onSettings: () => void;
   onAbout: () => void;
+  onCheckUpdate: () => void;
+  checking: boolean;
+  /** 线上有更新的版本时填它的版本号，用来在「检查更新」那行亮红点 */
+  updateVersion?: string;
   renewBusy: boolean;
 }) {
   return (
@@ -641,6 +881,23 @@ export function MineView(props: {
         </div>
 
         <div class="mine-card">
+          <button class="mine-row" onClick={props.onCheckUpdate} disabled={props.checking}>
+            <span class="ic">⤓</span>
+            <span class="tx">
+              <span class="t">
+                检查更新
+                {props.updateVersion ? <i class="dot" /> : null}
+              </span>
+              <span class="s">
+                {props.checking
+                  ? '正在检查…'
+                  : props.updateVersion
+                    ? `有新版本 v${props.updateVersion} · 点这里看改了什么`
+                    : `当前 v${props.version} · 点这里手动检查`}
+              </span>
+            </span>
+            <span class="chev">›</span>
+          </button>
           <button class="mine-row" onClick={props.onAbout}>
             <span class="ic">ⓘ</span>
             <span class="tx">

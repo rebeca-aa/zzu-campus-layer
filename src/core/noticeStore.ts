@@ -16,6 +16,11 @@ export interface NoticePrefs {
   keywords: string[];
   /** 已读卡片 id（`来源:原始 id`），只留最近 1000 条 */
   readIds: string[];
+  /**
+   * 「点过铃铛时已经看到的」卡片 id——只影响铃铛红点，不影响已读/未读。
+   * 红点数 = 卡片里不在 seenIds 的条数，所以点完铃铛红点归零，但列表里仍是未读。
+   */
+  seenIds: string[];
   updatedAt: number;
 }
 
@@ -26,6 +31,7 @@ export const DEFAULT_NOTICE_PREFS: NoticePrefs = {
   categories: [],
   keywords: [],
   readIds: [],
+  seenIds: [],
   updatedAt: 0,
 };
 
@@ -46,6 +52,7 @@ export async function getNoticePrefs(): Promise<NoticePrefs> {
     categories: sanitizeCategories(stored.categories),
     keywords: sanitizeKeywords(stored.keywords),
     readIds: Array.isArray(stored.readIds) ? stored.readIds.filter((x) => typeof x === 'string') : [],
+    seenIds: Array.isArray(stored.seenIds) ? stored.seenIds.filter((x) => typeof x === 'string') : [],
     updatedAt: typeof stored.updatedAt === 'number' ? stored.updatedAt : 0,
   };
 }
@@ -56,6 +63,7 @@ export async function setNoticePrefs(patch: Partial<Omit<NoticePrefs, 'updatedAt
     categories: patch.categories ? sanitizeCategories(patch.categories) : current.categories,
     keywords: patch.keywords ? sanitizeKeywords(patch.keywords) : current.keywords,
     readIds: patch.readIds ? patch.readIds.slice(-MAX_READ_IDS) : current.readIds,
+    seenIds: patch.seenIds ? patch.seenIds.slice(-MAX_READ_IDS) : current.seenIds,
     updatedAt: Date.now(),
   };
   await getKV().set(KEY, next);
@@ -69,13 +77,51 @@ export function subscribedCategories(prefs: NoticePrefs): NoticeCategory[] {
 
 export async function markNoticeRead(id: string): Promise<NoticePrefs> {
   const prefs = await getNoticePrefs();
-  if (prefs.readIds.includes(id)) return prefs;
-  return setNoticePrefs({ readIds: [...prefs.readIds, id] });
+  const patch: Partial<Omit<NoticePrefs, 'updatedAt'>> = {};
+  if (!prefs.readIds.includes(id)) patch.readIds = [...prefs.readIds, id];
+  /* 单独点开某条也算「看到了」，红点别为它亮着 */
+  if (!prefs.seenIds.includes(id)) patch.seenIds = [...prefs.seenIds, id];
+  if (!patch.readIds && !patch.seenIds) return prefs;
+  return setNoticePrefs(patch);
 }
 
 export async function isNoticeRead(id: string): Promise<boolean> {
   const prefs = await getNoticePrefs();
   return prefs.readIds.includes(id);
+}
+
+/**
+ * 「点了铃铛」＝ 这批通知我算看到了：把这些 id 记进 seenIds（**不动 readIds**）。
+ * 效果：铃铛红点归零，但列表里它们仍然是未读；之后新来的通知不在 seenIds 里，红点会重新亮并显示条数。
+ * 没有新增时返回 null（调用方就不用写存储）。
+ */
+export function withAllSeen(prefs: NoticePrefs, cards: Array<{ id: string }>): NoticePrefs | null {
+  const have = new Set(prefs.seenIds);
+  const add: string[] = [];
+  for (const card of cards) {
+    const id = typeof card?.id === 'string' ? card.id : '';
+    if (id && !have.has(id)) {
+      have.add(id);
+      add.push(id);
+    }
+  }
+  if (add.length === 0) return null;
+  return {
+    ...prefs,
+    seenIds: [...prefs.seenIds, ...add].slice(-MAX_READ_IDS),
+    updatedAt: Date.now(),
+  };
+}
+
+/** 铃铛红点该显示几：只数「没在 seenIds 里」的卡片，与已读/未读无关。 */
+export function countUnseen(prefs: NoticePrefs, cards: Array<{ id: string }>): number {
+  const seen = new Set(prefs.seenIds);
+  let n = 0;
+  for (const card of cards) {
+    const id = typeof card?.id === 'string' ? card.id : '';
+    if (id && !seen.has(id)) n += 1;
+  }
+  return n;
 }
 
 /** 一键清空已读（调试/重置用）。 */

@@ -39,14 +39,17 @@ import {
   getNoticePrefs,
   markNoticeRead,
   setNoticePrefs,
+  withAllSeen,
+  countUnseen,
   type NoticePrefs,
 } from '../src/core/noticeStore';
 import { getNoticeBody, runTool } from '../src/core/tools';
 import { todayShanghai } from '../src/core/util';
 import type { Term } from '../src/core/types';
 import { NoticeBoard } from '../src/ui/notice';
-import { HomeView, MineView, ScheduleView, TabBar, type Caller, type TabKey } from './views';
-import { fetchRelease, SEEN_KEY, shouldAnnounce, type Release } from './update';
+import { EnergyView, HomeView, MineView, ScheduleView, TabBar, type Caller, type TabKey } from './views';
+import { levelOf, loadHistory, loadSettings, pushPoint, readEnergy, saveHistory, saveSettings, type EnergyPoint, type EnergyReading, type EnergySettings } from '../src/core/energy';
+import { fetchRelease, isNewer, SEEN_KEY, shouldAnnounce, type Release } from './update';
 import './style.css';
 import './tabs.css';
 
@@ -102,7 +105,7 @@ function App() {
   /* 底部四栏：主页 / AI / 学期课表 / 我的 */
   const [tab, setTab] = useState<TabKey>('home');
   /* 我的下面的二级页 */
-  const [sub, setSub] = useState<'none' | 'theme' | 'settings' | 'about'>('none');
+  const [sub, setSub] = useState<'none' | 'theme' | 'settings' | 'about' | 'energy'>('none');
   const [term, setTerm] = useState<Term | null>(null);
   const [homeRefresh, setHomeRefresh] = useState(0);
   const [homeBusy, setHomeBusy] = useState(false);
@@ -110,8 +113,18 @@ function App() {
   const [updateReady, setUpdateReady] = useState(false);
   const [updateNotes, setUpdateNotes] = useState<string[]>([]);
   const [announce, setAnnounce] = useState<Release | null>(null);
+  /** 线上最新版（「我的 → 检查更新」查到的），有更新的版本时铃铛旁/该行亮红点 */
+  const [remote, setRemote] = useState<Release | null>(null);
+  const [checking, setChecking] = useState(false);
+  const [uptodate, setUptodate] = useState(false);
   /* 打开通知前在哪一栏，关掉时回那一栏（不是回 AI） */
   const [noticeFrom, setNoticeFrom] = useState<TabKey>('home');
+  /* 宿舍电量 */
+  const [energy, setEnergy] = useState<EnergyReading | null>(null);
+  const [energyRooms, setEnergyRooms] = useState<EnergySettings>({});
+  const [energyHistory, setEnergyHistory] = useState<EnergyPoint[]>([]);
+  const [energyBusy, setEnergyBusy] = useState(false);
+  const [energyError, setEnergyError] = useState('');
   const swReg = useRef<ServiceWorkerRegistration | null>(null);
   const [sheet, setSheet] = useState<'none' | 'login'>('none');
   /* 面板切换方向：fwd = 新面板从右边滑进来，back = 退回时从左边滑回来 */
@@ -356,8 +369,13 @@ const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
     if (ready) void loadNotices();
   }, [ready]);
 
-  /** 算未来 7 天的课前提醒并交给壳（没有壳时 pushReminders 返回 false，什么也不做）。 */
-  async function syncReminders() {
+  /**
+   * 算未来两周的课前提醒并交给壳（没有壳时 pushReminders 返回 false，什么也不做）。
+   *
+   * 除了挂载和切开关，还要在「回到前台」和「每 30 分钟」重排一次：
+   * 否则 App 一直开着（不重启），排好的窗口不会往后滚，开了 7～14 天之后就断档。
+   */
+  const syncReminders = useCallback(async () => {
     if (!notifyClass) return;
     try {
       const session = await loadSession();
@@ -368,7 +386,20 @@ const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
     } catch {
       /* 提醒排不上不该影响聊天 */
     }
-  }
+  }, [notifyClass]);
+
+  useEffect(() => {
+    if (!ready) return;
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') void syncReminders();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    const timer = window.setInterval(onVisible, 30 * 60_000);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisible);
+      window.clearInterval(timer);
+    };
+  }, [ready, syncReminders]);
 
   async function submit(text: string) {
     const question = text.trim();
@@ -732,11 +763,97 @@ const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
 
   const themeLabel = theme === 'cream' ? '米白' : theme === 'teal' ? '蓝绿' : '藏青';
 
+  /* 宿舍电量：设置 + 历史先读出来，读数按需（进主页/进二级页时） */
+  useEffect(() => {
+    void loadSettings().then(setEnergyRooms);
+    void loadHistory().then(setEnergyHistory);
+  }, []);
+
+  const loadEnergy = useCallback(
+    async (force = false) => {
+      if (energyBusy) return;
+      const session = await loadSession();
+      if (!session.portalToken && !session.jwxtToken) {
+        setEnergyError('还没登录：去「我的 → 账号」登录一次');
+        return;
+      }
+      const token = session.portalToken ?? session.jwxtToken!;
+      const rooms = await loadSettings();
+      setEnergyRooms(rooms);
+      if (!rooms.lightRoom && !rooms.acRoom) {
+        setEnergyError('');
+        return;
+      }
+      setEnergyBusy(true);
+      setEnergyError('');
+      try {
+        const reading = await readEnergy(token, rooms);
+        setEnergy(reading);
+        const today = todayShanghai();
+        const list = pushPoint(await loadHistory(), {
+          d: today,
+          ...(reading.light === undefined ? {} : { light: reading.light }),
+          ...(reading.ac === undefined ? {} : { ac: reading.ac }),
+        });
+        setEnergyHistory(list);
+        void saveHistory(list);
+      } catch (err) {
+        setEnergyError(err instanceof Error ? err.message : String(err));
+      } finally {
+        setEnergyBusy(false);
+      }
+    },
+    [energyBusy],
+  );
+
+  /* 启动时静默读一次（有房间号才读），主页卡片才有数 */
+  useEffect(() => {
+    void loadEnergy();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const energyValues = [energy?.light, energy?.ac].filter((v): v is number => typeof v === 'number');
+  const energyLevel = energyValues.length ? levelOf(Math.min(...energyValues)) : 'none';
+  const energyText = energy
+    ? `${energy.light !== undefined ? `照明 ${energy.light.toFixed(1)} 度` : '照明 —'}${
+        energy.ac !== undefined ? ` · 空调 ${energy.ac.toFixed(1)} 度` : ''
+      }`
+    : energyRooms.lightRoom || energyRooms.acRoom
+      ? energyError || '点开看'
+      : '未设置房间';
+
+  /* 进来自动静默查一次线上版本：有新版就在「检查更新」那行亮红点（不弹窗） */
+  useEffect(() => {
+    void fetchRelease()
+      .then((r) => setRemote(r ?? null))
+      .catch(() => undefined);
+  }, []);
+
   /* 有新版本装好了：弹窗，并把这次更新的说明一起拿出来 */
   const offerUpdate = useCallback(() => {
     setUpdateReady(true);
     void fetchRelease().then((r) => setUpdateNotes(r?.notes ?? []));
   }, []);
+
+  /* 「我的 → 检查更新」：主动查一次线上 version.json，有新版才亮红点 */
+  const checkUpdate = useCallback(async () => {
+    if (checking) return;
+    setChecking(true);
+    try {
+      const r = await fetchRelease();
+      setRemote(r ?? null);
+      if (r && isNewer(r.version, buildVersion)) {
+        setUpdateNotes(r.notes);
+        setUpdateReady(true);
+      } else {
+        setUptodate(true);
+      }
+    } catch {
+      setUptodate(true);
+    } finally {
+      setChecking(false);
+    }
+  }, [checking]);
 
   const applyUpdate = useCallback(() => {
     const reg = swReg.current;
@@ -769,7 +886,7 @@ const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
     }
   }, []);
 
-  const unread = noticeCards.filter((c) => !noticePrefs.readIds.includes(c.id)).length;
+  const unread = countUnseen(noticePrefs, noticeCards);
 
   /* 通知是盖在当前页上的二级页：再点一次铃铛就收起来，回来还是原来那一栏 */
   const closeNotices = (dir: 'fwd' | 'back' = 'back') => {
@@ -783,6 +900,9 @@ const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
     setNavDir('fwd');
     setView('notices');
     if (noticeCards.length === 0 && !noticeBusy) void loadNotices();
+    /* 点了铃铛＝打算看这些通知，红点当场消掉；之后进来的新通知会重新亮 */
+    const next = withAllSeen(noticePrefs, noticeCards);
+    if (next) void setNoticePrefs({ seenIds: next.seenIds }).then(setNoticePrefsState);
   };
 
   /* 切栏动画：先把当前页克隆一份盖在上面淡出，新页从下方 14px 处浮上来（交叉淡入） */
@@ -822,7 +942,7 @@ const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
     setNavDir('fwd');
     setSheet('login');
   };
-  const openSub = (which: 'theme' | 'settings' | 'about') => {
+  const openSub = (which: 'theme' | 'settings' | 'about' | 'energy') => {
     mark();
     setNavDir('fwd');
     setSub(which);
@@ -860,7 +980,7 @@ const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
       setTab((t as TabKey) || 'home');
       setView(v === 'notices' ? 'notices' : 'chat');
       setSheet(s === 'login' ? 'login' : 'none');
-      setSub(b === 'theme' || b === 'settings' || b === 'about' ? b : 'none');
+      setSub(b === 'theme' || b === 'settings' || b === 'about' || b === 'energy' ? b : 'none');
     };
     window.addEventListener('popstate', onPop);
     return () => window.removeEventListener('popstate', onPop);
@@ -898,6 +1018,11 @@ const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
                 void submit('今天的空教室');
                 return;
               }
+              if (kind === 'energy') {
+                openSub('energy');
+                void loadEnergy(true);
+                return;
+              }
               setNavDir('fwd');
               goTab('ai');
               void submit('我卡里还有多少钱');
@@ -906,6 +1031,8 @@ const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
             onBell={openNotices}
             onNotice={openNotices}
             onRefresh={refreshHome}
+            energyText={energyText}
+            energyLevel={energyLevel}
           />
         </div>
       )}
@@ -951,6 +1078,9 @@ const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
             setNavDir('fwd');
             openSub('about');
           }}
+          onCheckUpdate={() => void checkUpdate()}
+          checking={checking}
+          {...(remote && isNewer(remote.version, buildVersion) ? { updateVersion: remote.version } : {})}
         />
         </div>
       )}
@@ -964,172 +1094,6 @@ const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
             </div>
           </header>
 
-      {sheet === 'login' && (
-        <section class={`subpage${slide}`} key="login">
-          <div class="subhead">
-            <button
-              onClick={() => {
-                setNavDir('back');
-                stepBack();
-              }}
-            >
-              ‹ 返回
-            </button>
-            <strong>账号</strong>
-          </div>
-          {inShell ? (
-            <>
-              <p class="hint">
-                <strong>用学校账号登录一次就行</strong>——登录完会自动回到这里，不用复制任何东西。
-              </p>
-              <p class="row">
-                <button class="primary" onClick={() => void shellLogin()}>
-                  用学校账号登录
-                </button>
-                <a
-              class="ghost"
-              href={LIB_LOGIN}
-              target="_blank"
-              rel="noreferrer"
-              onClick={(e) => {
-                const b = (window as unknown as { CampusNotify?: { loginLibrary?: () => void } }).CampusNotify;
-                if (b?.loginLibrary) {
-                  e.preventDefault();
-                  b.loginLibrary();
-                }
-              }}
-            >
-            登录图书馆
-          </a>
-          <button class="ghost" onClick={() => void readClip()}>
-                  从剪贴板导入
-                </button>
-              </p>
-              <p class="hint">换手机、清了数据之后才需要重新登录。</p>
-            </>
-          ) : (
-            <>
-              <p class="hint">
-                <strong>办法一（推荐）：用学校账号登录</strong>
-                <br />
-                登录页上<strong>勾一下「记住我」</strong>：教务票能用 30 天，桌面上的扩展还会在过期时自己续一次，不用天天重登。
-              </p>
-              <p class="row">
-                <a class="primary" href={CAS_LOGIN} target="_blank" rel="noreferrer">
-                  打开学校登录页
-                </a>
-                <button class="ghost" onClick={() => void copyLoginUrl()}>
-                  复制登录页链接
-                </button>
-              </p>
-              <p class="row">
-                <a class="ghost" href={CAS_LOGIN_PORTAL} target="_blank" rel="noreferrer">
-                  登录门户（拿门户票）
-                </a>
-              </p>
-              <p class="hint">
-                登录成功后会跳到<strong>一屏代码文本</strong>，这时<strong>长按地址栏 → 复制整条网址 → 回来粘到下面</strong>。
-                <br />跳到 404 或空白页也照样复制地址栏里的网址。
-                <br />如果新打开的页面里<strong>没有地址栏</strong>，先点「复制登录页链接」，粘到自己手机的浏览器里打开。
-              </p>
-              <p class="hint">
-                <strong>办法二：「豫见郑大」App 分享链接</strong>（鸿蒙版可用）：App 里任意页面 → 分享 / 复制链接 → 粘到下面。
-              </p>
-              <p class="hint">
-                装了<strong>安卓壳</strong>的话最省事：在壳里点菜单「登录」，登录完自动灌进来，<strong>不用复制任何东西</strong>。
-              </p>
-            </>
-          )}
-          <textarea
-            rows={4}
-            placeholder="把复制的整条网址粘到这里"
-            value={paste}
-            onInput={(e) => setPaste((e.target as HTMLTextAreaElement).value)}
-          />
-          {note && <p class="hint warn">{note}</p>}
-          <div class="row">
-            <button class="primary" onClick={() => void doImport()} disabled={!paste.trim()}>
-              保存
-            </button>
-            <button class="ghost" onClick={() => void readClip()}>
-              从剪贴板读取
-            </button>
-            <button class="ghost" onClick={() => void doExport()}>
-              导出当前码
-            </button>
-            <button class="ghost" onClick={() => void shareLink()}>
-              复制分享链接
-            </button>
-            <button
-              class="ghost"
-              onClick={async () => {
-                await clearTokens();
-                setStatuses(await tokenStatuses());
-                setNote('已清除');
-              }}
-            >
-              清除
-            </button>
-          </div>
-          {note && <p class="note">{note}</p>}
-          <p class="hint" style="opacity:.6">前端 v{buildVersion} · 壳桥：{typeof (window as any).CampusNotify?.renewLogin === 'function' ? '可用' : '不可用'}</p>
-          <div class="theme-row" style="margin-bottom:12px;flex-wrap:wrap;gap:8px">
-            <button type="button" class="ghost" disabled={renewBusy} onClick={() => void doRenew()}>
-              {renewBusy ? '续期中…' : '立即续期（验登录）'}
-            </button>
-            <span class="hint" style="opacity:.7">
-              壳桥：{typeof (window as any).CampusNotify?.renewLogin === 'function' ? '可用' : '不可用'}
-            </span>
-            {renewStep && <span class="hint">{renewStep}</span>}
-            {renewNote === 'ok' && <span class="hint ok">续期成功</span>}
-            {renewNote === 'fail' && <span class="hint warn">续期失败（看下面提示）</span>}
-          </div>
-          <div class="theme-row">
-              <span>配色</span>
-              <button type="button" class={theme === 'cream' ? 'ghost on' : 'ghost'} onClick={() => void applyTheme('cream')}>米白</button>
-              <button type="button" class={theme === 'ink' ? 'ghost on' : 'ghost'} onClick={() => void applyTheme('ink')}>藏青</button>
-              <button type="button" class={theme === 'teal' ? 'ghost on' : 'ghost'} onClick={() => void applyTheme('teal')}>蓝绿</button>
-            </div>
-            <label class="row" style="align-items:center;gap:8px">
-            <input
-              type="checkbox"
-              checked={notifyClass}
-              onChange={(e) => void toggleClass((e.target as HTMLInputElement).checked)}
-            />
-            <span>课前提醒（每节课开课前 30 分钟各弹一条）</span>
-          </label>
-          <label class="row" style="align-items:center;gap:8px">
-            <input
-              type="checkbox"
-              checked={notifyNews}
-              onChange={(e) => void toggleNews((e.target as HTMLInputElement).checked)}
-            />
-            <span>资讯通知（有新通知时提醒一次）</span>
-          </label>
-          <p class="hint">
-            当前状态：教务 {jwxt?.present ? (jwxt.valid ? jwxt.remainingText : '已过期') : '未导入'} · 门户{' '}
-            {portal?.present ? (portal.valid ? portal.remainingText : '已过期') : '未导入'}
-            {jwxt?.expText ? `（教务到期 ${jwxt.expText}）` : ''}
-          </p>
-
-          <LlmFields
-            value={llm}
-            httpsPage={isHttps}
-            onChange={(patch) => {
-              setLlm({ ...llm, ...patch });
-              void patchLlm(patch);
-            }}
-          />
-          <div class="row">
-            <button class="mini" onClick={() => void testLlm()} disabled={testing}>
-              {testing ? '测试中…' : '测试连接'}
-            </button>
-          </div>
-          {testNote ? <p class={testNote.startsWith('连通') ? 'hint ok' : 'hint warn'}>{testNote}</p> : null}
-
-          <AppCreds browserOnly />
-        </section>
-      )}
 
 
       {tab === 'ai' && view === 'chat' && (
@@ -1257,6 +1221,135 @@ const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
         </div>
       )}
 
+      {sheet === 'login' && (
+        <section class={`subpage${slide}`} key="login">
+          <div class="subhead">
+            <button
+              onClick={() => {
+                setNavDir('back');
+                stepBack();
+              }}
+            >
+              ‹ 返回
+            </button>
+            <strong>账号</strong>
+          </div>
+          <div class="tabbody">
+          {inShell ? (
+            <>
+              <p class="hint">
+                <strong>用学校账号登录一次就行</strong>——登录完会自动回到这里，不用复制任何东西。
+              </p>
+              <p class="row">
+                <button class="primary" onClick={() => void shellLogin()}>
+                  用学校账号登录
+                </button>
+                <a
+              class="ghost"
+              href={LIB_LOGIN}
+              target="_blank"
+              rel="noreferrer"
+              onClick={(e) => {
+                const b = (window as unknown as { CampusNotify?: { loginLibrary?: () => void } }).CampusNotify;
+                if (b?.loginLibrary) {
+                  e.preventDefault();
+                  b.loginLibrary();
+                }
+              }}
+            >
+            登录图书馆
+          </a>
+          <button class="ghost" onClick={() => void readClip()}>
+                  从剪贴板导入
+                </button>
+              </p>
+              <p class="hint">换手机、清了数据之后才需要重新登录。</p>
+            </>
+          ) : (
+            <>
+              <p class="hint">
+                <strong>办法一（推荐）：用学校账号登录</strong>
+                <br />
+                登录页上<strong>勾一下「记住我」</strong>：教务票能用 30 天，桌面上的扩展还会在过期时自己续一次，不用天天重登。
+              </p>
+              <p class="row">
+                <a class="primary" href={CAS_LOGIN} target="_blank" rel="noreferrer">
+                  打开学校登录页
+                </a>
+                <button class="ghost" onClick={() => void copyLoginUrl()}>
+                  复制登录页链接
+                </button>
+              </p>
+              <p class="row">
+                <a class="ghost" href={CAS_LOGIN_PORTAL} target="_blank" rel="noreferrer">
+                  登录门户（拿门户票）
+                </a>
+              </p>
+              <p class="hint">
+                登录成功后会跳到<strong>一屏代码文本</strong>，这时<strong>长按地址栏 → 复制整条网址 → 回来粘到下面</strong>。
+                <br />跳到 404 或空白页也照样复制地址栏里的网址。
+                <br />如果新打开的页面里<strong>没有地址栏</strong>，先点「复制登录页链接」，粘到自己手机的浏览器里打开。
+              </p>
+              <p class="hint">
+                <strong>办法二：「豫见郑大」App 分享链接</strong>（鸿蒙版可用）：App 里任意页面 → 分享 / 复制链接 → 粘到下面。
+              </p>
+              <p class="hint">
+                装了<strong>安卓壳</strong>的话最省事：在壳里点菜单「登录」，登录完自动灌进来，<strong>不用复制任何东西</strong>。
+              </p>
+            </>
+          )}
+          <textarea
+            rows={4}
+            placeholder="把复制的整条网址粘到这里"
+            value={paste}
+            onInput={(e) => setPaste((e.target as HTMLTextAreaElement).value)}
+          />
+          {note && <p class="hint warn">{note}</p>}
+          <div class="row">
+            <button class="primary" onClick={() => void doImport()} disabled={!paste.trim()}>
+              保存
+            </button>
+            <button class="ghost" onClick={() => void readClip()}>
+              从剪贴板读取
+            </button>
+            <button class="ghost" onClick={() => void doExport()}>
+              导出当前码
+            </button>
+            <button class="ghost" onClick={() => void shareLink()}>
+              复制分享链接
+            </button>
+            <button
+              class="ghost"
+              onClick={async () => {
+                await clearTokens();
+                setStatuses(await tokenStatuses());
+                setNote('已清除');
+              }}
+            >
+              清除
+            </button>
+          </div>
+          <p class="hint" style="opacity:.6">
+            前端 v{buildVersion}
+          </p>
+          <div class="row" style="flex-wrap:wrap;gap:8px">
+            <button type="button" class="ghost" disabled={renewBusy} onClick={() => void doRenew()}>
+              {renewBusy ? '续期中…' : '立即续期（验登录）'}
+            </button>
+            {renewStep && <span class="hint">{renewStep}</span>}
+            {renewNote === 'ok' && <span class="hint ok">续期成功</span>}
+            {renewNote === 'fail' && <span class="hint warn">续期失败（看下面提示）</span>}
+          </div>
+          <p class="hint">
+            当前状态：教务 {jwxt?.present ? (jwxt.valid ? jwxt.remainingText : '已过期') : '未导入'} · 门户{' '}
+            {portal?.present ? (portal.valid ? portal.remainingText : '已过期') : '未导入'}
+            {jwxt?.expText ? `（教务到期 ${jwxt.expText}）` : ''}
+          </p>
+          <AppCreds browserOnly />
+          </div>
+        </section>
+      )}
+
       {sub === 'theme' && (
         <section class={`subpage${slide}`} key="theme">
           <div class="subhead">
@@ -1337,6 +1430,39 @@ const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
         </section>
       )}
 
+      {sub === 'energy' && (
+        <section class={`subpage${slide}`} key="energy">
+          <div class="subhead">
+            <button
+              onClick={() => {
+                setNavDir('back');
+                stepBack();
+              }}
+            >
+              ‹ 返回
+            </button>
+            <strong>宿舍电量</strong>
+          </div>
+          <EnergyView
+            {...(energy?.light === undefined ? {} : { light: energy.light })}
+            {...(energy?.ac === undefined ? {} : { ac: energy.ac })}
+            {...(energy?.at ? { at: energy.at } : {})}
+            {...(energyRooms.lightRoom ? { lightRoom: energyRooms.lightRoom } : {})}
+            {...(energyRooms.acRoom ? { acRoom: energyRooms.acRoom } : {})}
+            history={energyHistory}
+            busy={energyBusy}
+            {...(energyError ? { error: energyError } : {})}
+            onRefresh={() => void loadEnergy(true)}
+            onSave={(next) => {
+              setEnergyRooms(next);
+              void saveSettings(next);
+              window.setTimeout(() => void loadEnergy(true), 30);
+            }}
+            onClose={() => stepBack()}
+          />
+        </section>
+      )}
+
       {sub === 'about' && (
         <section class={`subpage${slide}`} key="about">
           <div class="subhead">
@@ -1380,6 +1506,118 @@ const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
                   </a>
                 </span>
               </div>
+            </div>
+            <div class="card credit">
+              <div class="cardhead">
+                <strong>开源与致谢</strong>
+                <span>MIT / Apache-2.0</span>
+              </div>
+              <div class="about-row">
+                <span class="k">ZZU.Py</span>
+                <span class="v">
+                  Illustar0 · MIT ·{' '}
+                  <a class="link" href="https://github.com/Illustar0/ZZU.Py" target="_blank" rel="noreferrer">
+                    仓库
+                  </a>
+                  <br />
+                  一卡通、教务这些接口能少摸索一大半，宿舍电量就是照它的协议写的
+                </span>
+              </div>
+              <div class="about-row">
+                <span class="k">ZZU-Electricity</span>
+                <span class="v">
+                  TorCroft · MIT ·{' '}
+                  <a class="link" href="https://github.com/TorCroft/ZZU-Electricity" target="_blank" rel="noreferrer">
+                    仓库
+                  </a>
+                  <br />
+                  电量监控与「低于阈值提醒」的做法参考
+                </span>
+              </div>
+              <div class="about-row">
+                <span class="k">Electricity-Monitor</span>
+                <span class="v">
+                  Elykia093 · MIT ·{' '}
+                  <a class="link" href="https://github.com/Elykia093/ZZU-Electricity-Monitor" target="_blank" rel="noreferrer">
+                    仓库
+                  </a>
+                  <br />
+                  照明 / 空调分表、房间号编码格式
+                </span>
+              </div>
+              <div class="about-row">
+                <span class="k">Dorm-Electricity</span>
+                <span class="v">
+                  rimrose · MIT ·{' '}
+                  <a class="link" href="https://github.com/rimrose/ZZU-Dorm-Electricity-Balance-Base" target="_blank" rel="noreferrer">
+                    仓库
+                  </a>
+                  <br />
+                  余额曲线的呈现方式
+                </span>
+              </div>
+              <div class="about-row">
+                <span class="k">Preact</span>
+                <span class="v">
+                  Jason Miller 与贡献者 · MIT ·{' '}
+                  <a class="link" href="https://preactjs.com" target="_blank" rel="noreferrer">
+                    官网
+                  </a>
+                  <br />
+                  界面这一层
+                </span>
+              </div>
+              <div class="about-row">
+                <span class="k">Zod</span>
+                <span class="v">
+                  Colin McDonnell · MIT ·{' '}
+                  <a class="link" href="https://zod.dev" target="_blank" rel="noreferrer">
+                    官网
+                  </a>
+                  <br />
+                  工具参数校验
+                </span>
+              </div>
+              <div class="about-row">
+                <span class="k">Vite</span>
+                <span class="v">
+                  Evan You 与 Vite 团队 · MIT ·{' '}
+                  <a class="link" href="https://vite.dev" target="_blank" rel="noreferrer">
+                    官网
+                  </a>
+                  <br />
+                  构建（开发期依赖）
+                </span>
+              </div>
+              <div class="about-row">
+                <span class="k">TypeScript</span>
+                <span class="v">
+                  Microsoft · Apache-2.0 ·{' '}
+                  <a class="link" href="https://www.typescriptlang.org" target="_blank" rel="noreferrer">
+                    官网
+                  </a>
+                  <br />
+                  类型检查（开发期依赖）
+                </span>
+              </div>
+              <div class="about-row">
+                <span class="k">Vitest</span>
+                <span class="v">
+                  Anthony Fu 等 · MIT ·{' '}
+                  <a class="link" href="https://vitest.dev" target="_blank" rel="noreferrer">
+                    官网
+                  </a>
+                  <br />
+                  单元测试（开发期依赖）
+                </span>
+              </div>
+              <div class="about-row">
+                <span class="k">类型定义</span>
+                <span class="v">@types/chrome · @types/node · DefinitelyTyped 社区 · MIT（开发期依赖）</span>
+              </div>
+              <p class="hint">
+                真诚感谢上面这些作者：学校的接口没有文档，是他们一点点摸清楚并开源出来，这个项目才做得动。各项目的许可与版权归各位作者所有。
+              </p>
             </div>
           </div>
         </section>
@@ -1432,7 +1670,7 @@ const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
       {updateReady && (
         <div class="dialog-wrap" role="dialog" aria-modal="true">
           <div class="dialog">
-            <div class="d-title">新版本已就绪</div>
+            <div class="d-title">{remote?.version ? `发现新版本 v${remote.version}` : '新版本已就绪'}</div>
             <p class="d-sub">刷新一下就是新版。登录态、常用语、聊天记录都留在本机，不会丢。</p>
             {updateNotes.length > 0 && (
               <ul class="d-notes">
@@ -1447,6 +1685,20 @@ const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
               </button>
               <button class="primary" onClick={applyUpdate}>
                 立即更新
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {uptodate && (
+        <div class="dialog-wrap" role="dialog" aria-modal="true">
+          <div class="dialog">
+            <div class="d-title">已经是最新版</div>
+            <p class="d-sub">当前 v{buildVersion}，没有更新的版本了。</p>
+            <div class="d-actions">
+              <button class="primary" onClick={() => setUptodate(false)}>
+                知道了
               </button>
             </div>
           </div>
