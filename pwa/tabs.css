@@ -206,24 +206,29 @@ header.top .acts {
   cursor: pointer;
 }
 
-/* 主页：今日课表 */
+/* 主页：今日课表（每门课一张同色系的卡片，配色跟学期课表那边走） */
 .lessons {
   display: flex;
   flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
 }
 .lesson {
   display: flex;
   gap: 11px;
-  padding: 8px 0;
-}
-.lesson + .lesson {
-  border-top: 1px dashed rgba(255, 255, 255, 0.07);
+  padding: 9px 11px 9px 12px;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--cl, var(--c, #6a2f6d)) 14%, var(--panel));
+  border: 1px solid color-mix(in srgb, var(--cl, var(--c, #6a2f6d)) 30%, transparent);
+  border-left: 3px solid var(--cl, var(--c, #6a2f6d));
 }
 .lesson .time {
   flex: 0 0 52px;
   font: 12.5px/1.45 ui-monospace, Menlo, Consolas, monospace;
-  color: var(--accent);
+  color: var(--cl, var(--c, var(--accent)));
+  font-weight: 600;
   padding-top: 1px;
+  font-variant-numeric: tabular-nums;
 }
 .lesson .body {
   min-width: 0;
@@ -232,17 +237,29 @@ header.top .acts {
   font-weight: 600;
   font-size: 14.5px;
   word-break: break-word;
+  color: var(--cl, var(--c, var(--text)));
 }
 .lesson .meta {
   font-size: 12.5px;
   color: var(--dim);
   margin-top: 1px;
 }
+.lesson.now {
+  border-color: color-mix(in srgb, var(--cl, var(--c, var(--accent))) 55%, transparent);
+  border-left-color: var(--cl, var(--c, var(--accent)));
+  box-shadow: 0 0 0 1.5px color-mix(in srgb, var(--cl, var(--c, var(--accent))) 45%, transparent);
+}
 .lesson.now .time {
   color: var(--ok);
 }
 .lesson.done {
-  opacity: 0.5;
+  opacity: 0.68;
+}
+/* 深色两套底色本来就深：把课程色往白里提一点再上色，卡片才不糊成一团 */
+html[data-theme='ink'] .lesson,
+html[data-theme='teal'] .lesson {
+  --cl: color-mix(in srgb, var(--c, #6a2f6d) 55%, #fff);
+  background: color-mix(in srgb, var(--cl) 20%, var(--panel));
 }
 .empty-line {
   font-size: 13px;

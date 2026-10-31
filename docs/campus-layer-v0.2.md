@@ -346,6 +346,7 @@ v0.1 假设「用 content script 解析教务网页的 DOM」。实测后这一�
 | 44 | **0.2.82 电量页的小修**（贡献者 Ayaka688）：`.energy-meta` 改 `align-items:flex-start`，报错文本 `flex:1 1 auto; min-width:0`，按钮 `flex:0 0 auto; white-space:nowrap`——长文案不再把「刷新」挤成竖排 | 版本 0.2.82（`versionCode 69`）；`vite build` ✓、打桩截图核对 |
 | 45 | **0.2.83 安卓壳的原生网络通道**（贡献者 Ayaka688）：`CampusNet.java`（`@JavascriptInterface http(method,url,headersJson,body)`，`HttpURLConnection` + 不跟随跳转以保留 `Location` 里的 tid，返回 `{status,body,location,error?}`），`MainActivity` 里 `addJavascriptInterface(new CampusNet(), "CampusNet")`；网页侧 `src/core/energy.ts` 的 `ecardRequest()` 自动优先走它——一卡通接口无 CORS，网页与 WebView 里的 `fetch` 必被拦，只有原生请求能发 | 版本 0.2.83（`versionCode 70`）；`tsc` 0 错、`vitest` 589 passed / 12 skipped、`vite build` ✓；APK 由 CI 编译 |
 | 46 | **0.2.84 去掉宿舍电量**（贡献者 Ayaka688）：①`ecard.v.zzu.edu.cn` 不带 CORS，浏览器里的 PWA 永远发不出请求，只有安卓壳的原生通道（0.2.83 的 `CampusNet`）或扩展面板才读得到；②考虑到手机上都装新版 APK 的成本，功能整体撤掉——删 `src/core/energy.ts`、`test/energy.test.ts`、`CampusNet.java`、`EnergyView`/`PlacePicker`/`Spark`、主页第四块入口与全部电量样式；③`manifest.json` 收回 `https://ecard.v.zzu.edu.cn/*` 权限，主页入口恢复一行三列，关于页/README 致谢只保留真正在用的项目。 |
+| 47 | **0.2.85 两处手感修复**（贡献者 Ayaka688）：①切到 AI 栏时聊天区重新挂载、`scrollTop` 归零，看起来像「每次都从最上面开始」——现在进入时在绘制前直接 `scrollTop = scrollHeight`，落在最新一条，并把「贴底」标记复位；②主页「今日课表」原来是纯文字列表，改成每节课一张同色系卡片（左侧色条 + 淡底 + 同色课名与时间），颜色按课名哈希分配、撞色顺延，深浅两套主题各一套处理；③顺手修：拉课表失败时不再把缓存清成「今天没有课」，只提示一句。 |
 
 **本轮仍未做（明确记录）**
 - 图书馆座位图依赖该站自身登录态（与学校 CAS 是两套账号），且**同一时间只允许一台设备在线**；

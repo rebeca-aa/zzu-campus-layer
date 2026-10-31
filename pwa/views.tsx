@@ -151,7 +151,7 @@ export function HomeView(props: {
         setCourses(Array.isArray(payload?.courses) ? payload.courses : []);
         setWeek(typeof payload?.week === 'number' ? payload.week : null);
       } else {
-        setCourses([]);
+        /* 拉不到就先留着缓存里的那节课，只提示一句，别把页面清成「今天没有课」 */
         setErr(sched.error ?? '');
       }
     })();
@@ -214,6 +214,8 @@ export function HomeView(props: {
   const nowMin = minutesOf(`${pad(new Date().getHours())}:${pad(new Date().getMinutes())}`);
   const list = courses ?? [];
   const next = list.find((c) => minutesOf(c.endTime) > nowMin);
+  /* 每门课一个固定颜色，跟「学期课表」那边同一套分配逻辑，但用更好区分的亮色 */
+  const lessonColors = useMemo(() => assignColors(list, LESSON_COLORS), [list]);
 
   return (
     <>
@@ -269,7 +271,11 @@ export function HomeView(props: {
               const done = minutesOf(c.endTime) <= nowMin;
               const live = !done && minutesOf(c.startTime) <= nowMin;
               return (
-                <div class={`lesson${done ? ' done' : ''}${live ? ' now' : ''}`} key={c.key}>
+                <div
+                  class={`lesson${done ? ' done' : ''}${live ? ' now' : ''}`}
+                  key={c.key}
+                  style={`--c:${lessonColors[c.name] ?? '#6a2f6d'}`}
+                >
                   <div class="time">
                     {c.startTime}
                     <br />
@@ -393,23 +399,41 @@ function termLabel(term: Term | null): string {
   return `${m[1]}-${m[2]} ${name}`;
 }
 
+/** 主页「今日课表」用的颜色：比课表色块那套更亮、彼此更好区分，深浅两套底色都能看清 */
+const LESSON_COLORS = [
+  '#c0392b',
+  '#d2691e',
+  '#b8860b',
+  '#4d7c0f',
+  '#0f766e',
+  '#1d4ed8',
+  '#6d28d9',
+  '#be185d',
+  '#0369a1',
+  '#92400e',
+];
+
 /** 同一屏里两门课不撞色：先按名字取下标，撞了就往后面顺延到空位 */
-function assignColors(list: Course[]): Record<string, string> {
+function assignColors(list: Course[], palette: string[] = COLORS): Record<string, string> {
   const used = new Set<number>();
   const map: Record<string, string> = {};
   for (const c of list) {
     if (map[c.name]) continue;
-    const base = COLORS.indexOf(colorOf(c.name));
-    let picked = base < 0 ? 0 : base;
-    for (let k = 0; k < COLORS.length; k += 1) {
-      const idx = (picked + k) % COLORS.length;
+    let h = 0x811c9dc5;
+    for (let i = 0; i < c.name.length; i += 1) {
+      h ^= c.name.charCodeAt(i);
+      h = Math.imul(h, 0x01000193) >>> 0;
+    }
+    let picked = h % palette.length;
+    for (let k = 0; k < palette.length; k += 1) {
+      const idx = (picked + k) % palette.length;
       if (!used.has(idx)) {
         picked = idx;
         break;
       }
     }
     used.add(picked);
-    map[c.name] = COLORS[picked]!;
+    map[c.name] = palette[picked]!;
   }
   return map;
 }

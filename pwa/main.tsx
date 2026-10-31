@@ -345,6 +345,18 @@ const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
     if (el) el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
   }, [messages, busy]);
 
+  /*
+   * 从别的栏切回 AI 时，聊天区是重新挂载的，scrollTop 会回到 0（看着像「每次都跳最上方」）。
+   * 进来就直接停在最新一条，不播动画；顺便把「贴着底」的状态重置，之后新消息才会自动跟随。
+   */
+  useLayoutEffect(() => {
+    if (tab !== 'ai' || view !== 'chat') return;
+    const el = scroller.current;
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
+    stickBottom.current = true;
+  }, [tab, view]);
+
   /* 每次聊完落一次盘：只留最近 10 条，重字段在 transcript.ts 里洗掉 */
   useEffect(() => {
     if (!hydrated.current) return;
