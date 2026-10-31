@@ -48,7 +48,7 @@ import { todayShanghai } from '../src/core/util';
 import type { Term } from '../src/core/types';
 import { NoticeBoard } from '../src/ui/notice';
 import { EnergyView, HomeView, MineView, ScheduleView, TabBar, type Caller, type TabKey } from './views';
-import { levelOf, loadHistory, loadSettings, pushPoint, readEnergy, saveHistory, saveSettings, type EnergyPoint, type EnergyReading, type EnergySettings } from '../src/core/energy';
+import { discoverRoom, fetchPlaces, levelOf, loadHistory, loadSettings, pushPoint, readEnergy, saveHistory, saveSettings, type EnergyPoint, type EnergyReading, type EnergySettings } from '../src/core/energy';
 import { fetchRelease, isNewer, SEEN_KEY, shouldAnnounce, type Release } from './update';
 import './style.css';
 import './tabs.css';
@@ -125,6 +125,9 @@ function App() {
   const [energyHistory, setEnergyHistory] = useState<EnergyPoint[]>([]);
   const [energyBusy, setEnergyBusy] = useState(false);
   const [energyError, setEnergyError] = useState('');
+  /* 自动识别房间号的提示（只在第一次没填房间、又猜出来的时候显示一次） */
+  const [energyHint, setEnergyHint] = useState('');
+  const energyTriedDetect = useRef(false);
   const swReg = useRef<ServiceWorkerRegistration | null>(null);
   const [sheet, setSheet] = useState<'none' | 'login'>('none');
   /* 面板切换方向：fwd = 新面板从右边滑进来，back = 退回时从左边滑回来 */
@@ -778,11 +781,31 @@ const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
         return;
       }
       const token = session.portalToken ?? session.jwxtToken!;
-      const rooms = await loadSettings();
+      let rooms = await loadSettings();
       setEnergyRooms(rooms);
       if (!rooms.lightRoom && !rooms.acRoom) {
-        setEnergyError('');
-        return;
+        /* 没填过房间号：先试着让一卡通自己报一次（zzupy 的 get_default_room 同一条路） */
+        if (!energyTriedDetect.current) {
+          energyTriedDetect.current = true;
+          setEnergyBusy(true);
+          try {
+            const guess = await discoverRoom(token);
+            if (guess) {
+              rooms = { lightRoom: guess };
+              setEnergyRooms(rooms);
+              await saveSettings(rooms);
+              setEnergyHint(`已经自动认出你的房间是 ${guess}；空调要是另一块表，把它的房间号补上。`);
+            }
+          } catch {
+            /* 猜不出来就当没有，让用户自己填 */
+          } finally {
+            setEnergyBusy(false);
+          }
+        }
+        if (!rooms.lightRoom && !rooms.acRoom) {
+          setEnergyError('');
+          return;
+        }
       }
       setEnergyBusy(true);
       setEnergyError('');
@@ -1452,7 +1475,14 @@ const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
             history={energyHistory}
             busy={energyBusy}
             {...(energyError ? { error: energyError } : {})}
+            {...(energyHint ? { hint: energyHint } : {})}
             onRefresh={() => void loadEnergy(true)}
+            onFetchPlaces={async (parentId) => {
+              const session = await loadSession();
+              const token = session.portalToken ?? session.jwxtToken;
+              if (!token) throw new Error('还没登录：去「我的 → 账号」登录一次');
+              return fetchPlaces(token, parentId);
+            }}
             onSave={(next) => {
               setEnergyRooms(next);
               void saveSettings(next);

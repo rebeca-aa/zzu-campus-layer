@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import type { Course, Term } from '../src/core/types';
+import { parseRoom, type PlaceOption } from '../src/core/energy';
 
 export type TabKey = 'home' | 'ai' | 'schedule' | 'mine';
 
@@ -665,6 +666,10 @@ export function EnergyView(props: {
   onRefresh: () => void;
   onSave: (s: { lightRoom?: string; acRoom?: string }) => void;
   onClose: () => void;
+  /** 第一次没填房间号、但自动认出来时给一句说明 */
+  hint?: string;
+  /** 拉下一级的房间列表（校区 → 楼 → 单元 → 房间） */
+  onFetchPlaces: (parentId: string) => Promise<PlaceOption[]>;
 }) {
   const [lightRoom, setLightRoom] = useState(props.lightRoom ?? '');
   const [acRoom, setAcRoom] = useState(props.acRoom ?? '');
@@ -676,6 +681,54 @@ export function EnergyView(props: {
 
   const tone = (v?: number) => (v === undefined ? '' : v <= 8 ? 'low' : v <= 20 ? 'warn' : 'ok');
   const last = props.history.slice(-30);
+
+  /* 从列表里选房间：校区 → 楼 → 单元 → 房间，一级一级往下点 */
+  const [picking, setPicking] = useState(false);
+  const [levels, setLevels] = useState<PlaceOption[][]>([]);
+  const [path, setPath] = useState<PlaceOption[]>([]);
+  const [placesBusy, setPlacesBusy] = useState(false);
+  const [placesError, setPlacesError] = useState('');
+
+  const startPicking = async () => {
+    setPicking(true);
+    setPath([]);
+    setLevels([]);
+    setPlacesBusy(true);
+    setPlacesError('');
+    try {
+      setLevels([await props.onFetchPlaces('')]);
+    } catch (err) {
+      setPlacesError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setPlacesBusy(false);
+    }
+  };
+
+  const pickLevel = async (index: number, option: PlaceOption) => {
+    /* 选中项本身就是完整房间号（99-1--2-101）→ 到底了，直接存下并读数 */
+    if (parseRoom(option.id)) {
+      setPath([...path.slice(0, index), option]);
+      setLightRoom(option.id);
+      setPicking(false);
+      setPath([]);
+      setLevels([]);
+      setEditing(false);
+      props.onSave({ lightRoom: option.id, ...(acRoom.trim() ? { acRoom: acRoom.trim() } : {}) });
+      return;
+    }
+    const nextPath = [...path.slice(0, index), option];
+    setPath(nextPath);
+    setPlacesBusy(true);
+    setPlacesError('');
+    try {
+      const children = await props.onFetchPlaces(option.id);
+      setLevels([...levels.slice(0, index + 1), children]);
+    } catch (err) {
+      setPlacesError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setPlacesBusy(false);
+    }
+  };
 
   return (
     <div class="tabbody">
@@ -710,6 +763,8 @@ export function EnergyView(props: {
         </div>
       </div>
 
+      {props.hint && <p class="hint">{props.hint}</p>}
+
       {(props.light !== undefined || last.length > 1) && (
         <div class="card">
           <div class="cardhead">
@@ -743,25 +798,45 @@ export function EnergyView(props: {
         ) : (
           <>
             <p class="hint">
-              从学校的电控页面或「房间查询」里复制，形如 <code>99-1--1-101</code>。照明和空调是两块表，房间号可能不同；
-              没有空调就留空。
+              不用手抄房间号：点「从列表里选」往下点两下就行。也可以直接填，
+              形如 <code>99-1--1-101</code>；照明和空调是两块表，没有空调就留空。
             </p>
-            <label class="field">
-              <span>照明</span>
-              <input
-                value={lightRoom}
-                placeholder="99-1--1-101"
-                onInput={(e) => setLightRoom((e.target as HTMLInputElement).value)}
+            {picking ? (
+              <PlacePicker
+                levels={levels}
+                path={path}
+                loading={placesBusy}
+                {...(placesError ? { error: placesError } : {})}
+                onPick={(index, option) => void pickLevel(index, option)}
+                onCancel={() => {
+                  setPicking(false);
+                  setPath([]);
+                  setLevels([]);
+                }}
               />
-            </label>
-            <label class="field">
-              <span>空调</span>
-              <input
-                value={acRoom}
-                placeholder="留空表示没有空调表"
-                onInput={(e) => setAcRoom((e.target as HTMLInputElement).value)}
-              />
-            </label>
+            ) : (
+              <>
+                <label class="field">
+                  <span>照明</span>
+                  <input
+                    value={lightRoom}
+                    placeholder="99-1--1-101"
+                    onInput={(e) => setLightRoom((e.target as HTMLInputElement).value)}
+                  />
+                </label>
+                <label class="field">
+                  <span>空调</span>
+                  <input
+                    value={acRoom}
+                    placeholder="留空表示没有空调表"
+                    onInput={(e) => setAcRoom((e.target as HTMLInputElement).value)}
+                  />
+                </label>
+                <button class="ghost wide" onClick={() => void startPicking()}>
+                  从列表里选
+                </button>
+              </>
+            )}
             <button
               class="primary wide"
               onClick={() => {
@@ -776,6 +851,46 @@ export function EnergyView(props: {
       </div>
 
       <p class="hint">低于 20 度变黄、8 度变红；每天第一次打开会记一个点，画的就是它。</p>
+    </div>
+  );
+}
+
+/* 房间四级选择：一个层级一个下拉，选到底就当作房间 */
+function PlacePicker(props: {
+  levels: PlaceOption[][];
+  path: PlaceOption[];
+  loading: boolean;
+  error?: string;
+  onPick: (index: number, option: PlaceOption) => void;
+  onCancel: () => void;
+}) {
+  return (
+    <div class="picker">
+      {props.levels.map((options, index) => (
+        <label class="field" key={index}>
+          <span>{['校区', '楼', '单元', '房间'][index] ?? `第 ${index + 1} 级`}</span>
+          <select
+            value={props.path[index]?.id ?? ''}
+            onChange={(e) => {
+              const id = (e.target as HTMLSelectElement).value;
+              const hit = options.find((o) => o.id === id);
+              if (hit) props.onPick(index, hit);
+            }}
+          >
+            <option value="">选择…</option>
+            {options.map((option) => (
+              <option key={option.id} value={option.id}>
+                {option.name}
+              </option>
+            ))}
+          </select>
+        </label>
+      ))}
+      {props.loading && <p class="hint">读取中…</p>}
+      {props.error && <p class="hint warn">{props.error}</p>}
+      <button class="ghost wide" onClick={props.onCancel}>
+        改回手动填
+      </button>
     </div>
   );
 }

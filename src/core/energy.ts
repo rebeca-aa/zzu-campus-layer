@@ -156,6 +156,100 @@ export async function fetchRoomBalance(userToken: string, room: string): Promise
   return { balance, ...(pickRoom(json) ? { defaultRoom: pickRoom(json) } : {}) };
 }
 
+/**
+ * 用「空房间号」问一次：如果服务端认得出你绑定的房间，会把房间号一起带回来。
+ *
+ * 这条路来自 `zzupy` 的 `get_default_room()`——**走的是 `/server/utilities/config`**
+ * （body 只有 `{utilityType:'electric'}`），返回 `resultData.location.room`。
+ * 早先我照着 account 接口空着房间号问，那条路服务端不认，所以永远问不出来。
+ */
+export async function discoverRoom(userToken: string): Promise<string | undefined> {
+  const access = await ecardToken(userToken);
+  const res = await fetch(`${ECARD_BASE}/server/utilities/config`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: access },
+    body: JSON.stringify({ utilityType: 'electric' }),
+    credentials: 'omit',
+    cache: 'no-store',
+  });
+  const json = (await res.json()) as {
+    resultData?: { location?: { room?: unknown } };
+  };
+  const room = json.resultData?.location?.room;
+  if (typeof room === 'string' && parseRoom(room)) return room;
+  return pickRoom(json);
+}
+
+const LOCATION_URL = `${ECARD_BASE}/server/utilities/location`;
+
+export interface PlaceOption {
+  id: string;
+  name: string;
+}
+
+/**
+ * 由「上一级的 id」推出 `/server/utilities/location` 要什么参数。
+ *
+ * 层级按 id 里 `-` 的个数判断（和 `zzupy.get_room_dict()` 一致）：
+ * `''` → 校区、`99` → 楼、`99-1` → 单元、`99-1--1` → 房间。
+ */
+export function locationQuery(parentId: string): {
+  locationType: 'bigArea' | 'building' | 'unit' | 'room';
+  area: string;
+  building: string;
+  level: string;
+} | null {
+  const id = parentId.trim();
+  if (!id) return { locationType: 'bigArea', area: '', building: '', level: '' };
+  const dashes = id.split('-').length - 1;
+  if (dashes === 0) return { locationType: 'building', area: id, building: '', level: '' };
+  if (dashes === 1) {
+    const [area = '', building = ''] = id.split('-');
+    return { locationType: 'unit', area, building, level: '' };
+  }
+  if (dashes === 3) {
+    const [head = '', tail = ''] = id.split('--');
+    const [area = '', building = ''] = head.split('-');
+    const level = tail.split('-')[0] ?? '';
+    return { locationType: 'room', area, building, level };
+  }
+  return null;
+}
+
+/** 拉下一级的房间/楼/层列表（校园卡没绑房间时，用它让用户选题） */
+export async function fetchPlaces(userToken: string, parentId = ''): Promise<PlaceOption[]> {
+  const query = locationQuery(parentId);
+  if (!query) throw new Error(`房间号格式不对：${parentId}`);
+  const access = await ecardToken(userToken);
+  const res = await fetch(LOCATION_URL, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: access },
+    body: JSON.stringify({
+      utilityType: 'electric',
+      locationType: query.locationType,
+      bigArea: '',
+      area: query.area,
+      building: query.building,
+      unit: '',
+      level: query.level,
+      room: '',
+      subArea: '',
+    }),
+    credentials: 'omit',
+    cache: 'no-store',
+  });
+  const json = (await res.json()) as { resultData?: { locationList?: unknown } };
+  const list = json.resultData?.locationList;
+  if (!Array.isArray(list)) return [];
+  const out: PlaceOption[] = [];
+  for (const item of list) {
+    const id = (item as { id?: unknown }).id;
+    const name = (item as { name?: unknown }).name;
+    if (typeof id === 'string' && id && typeof name === 'string' && name) out.push({ id, name });
+  }
+  return out;
+}
+
 /** 一次读照明 + 空调两组表 */
 export async function readEnergy(userToken: string, settings: EnergySettings): Promise<EnergyReading> {
   const at = new Date().toISOString();

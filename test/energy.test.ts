@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
+  discoverRoom,
+  fetchPlaces,
   HISTORY_LIMIT,
   levelOf,
+  locationQuery,
   parseRoom,
   pickBalance,
   pickRoom,
@@ -87,5 +90,116 @@ describe('pushPoint', () => {
     }
     expect(list).toHaveLength(HISTORY_LIMIT);
     expect(list[list.length - 1]!.light).toBe(HISTORY_LIMIT + 9);
+  });
+});
+
+describe('discoverRoom', () => {
+  const stub = (account: unknown) => {
+    const real = globalThis.fetch;
+    globalThis.fetch = (async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes('/server/auth/host/open')) {
+        return new Response(null, {
+          status: 302,
+          headers: { location: 'https://ecard.v.zzu.edu.cn/h5/index.html?tid=TID-1#/' },
+        });
+      }
+      if (url.includes('/server/auth/getToken')) {
+        return new Response(JSON.stringify({ resultData: { accessToken: 'ACC-9' } }));
+      }
+      return new Response(JSON.stringify(account));
+    }) as typeof fetch;
+    return () => {
+      globalThis.fetch = real;
+    };
+  };
+
+  it('服务端带回房间号就用它', async () => {
+    const restore = stub({ success: true, resultData: { location: { room: '99-1--1-101' } } });
+    try {
+      await expect(discoverRoom('cas-token')).resolves.toBe('99-1--1-101');
+    } finally {
+      restore();
+    }
+  });
+
+  it('没带房间号就返回 undefined（让用户手填）', async () => {
+    const restore = stub({ success: false, resultData: null });
+    try {
+      await expect(discoverRoom('cas-token')).resolves.toBeUndefined();
+    } finally {
+      restore();
+    }
+  });
+
+  it('走的是 config 接口（account 空着问是不认的）', async () => {
+    const real = globalThis.fetch;
+    const seen: string[] = [];
+    globalThis.fetch = (async (input: string | URL | Request) => {
+      const url = String(input);
+      seen.push(url);
+      if (url.includes('/server/auth/host/open')) {
+        return new Response(null, { status: 302, headers: { location: 'https://x/h5/?tid=T' } });
+      }
+      if (url.includes('/server/auth/getToken')) {
+        return new Response(JSON.stringify({ resultData: { accessToken: 'ACC' } }));
+      }
+      return new Response(JSON.stringify({ resultData: { location: { room: '99-1--1-101' } } }));
+    }) as typeof fetch;
+    try {
+      await discoverRoom('cas-token');
+      expect(seen.some((u) => u.includes('/server/utilities/config'))).toBe(true);
+      expect(seen.some((u) => u.includes('/server/utilities/account'))).toBe(false);
+    } finally {
+      globalThis.fetch = real;
+    }
+  });
+});
+
+describe('locationQuery', () => {
+  it('按 id 里的横线数判断层级', () => {
+    expect(locationQuery('')).toEqual({ locationType: 'bigArea', area: '', building: '', level: '' });
+    expect(locationQuery('99')).toEqual({ locationType: 'building', area: '99', building: '', level: '' });
+    expect(locationQuery('99-1')).toEqual({ locationType: 'unit', area: '99', building: '1', level: '' });
+    expect(locationQuery('99-1--2')).toEqual({ locationType: 'room', area: '99', building: '1', level: '2' });
+  });
+
+  it('横线数不对就当非法', () => {
+    expect(locationQuery('99-1-2')).toBeNull();
+    expect(locationQuery('99-1--2-3-4')).toBeNull();
+  });
+});
+
+describe('fetchPlaces', () => {
+  it('把 locationList 洗成 {id,name}', async () => {
+    const real = globalThis.fetch;
+    globalThis.fetch = (async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes('/server/auth/host/open')) {
+        return new Response(null, { status: 302, headers: { location: 'https://x/h5/?tid=T' } });
+      }
+      if (url.includes('/server/auth/getToken')) {
+        return new Response(JSON.stringify({ resultData: { accessToken: 'ACC' } }));
+      }
+      return new Response(
+        JSON.stringify({
+          resultData: {
+            locationList: [
+              { id: '99', name: '主校区' },
+              { id: '', name: '脏数据' },
+              { id: '98', name: '南校区' },
+            ],
+          },
+        }),
+      );
+    }) as typeof fetch;
+    try {
+      await expect(fetchPlaces('cas-token', '')).resolves.toEqual([
+        { id: '99', name: '主校区' },
+        { id: '98', name: '南校区' },
+      ]);
+    } finally {
+      globalThis.fetch = real;
+    }
   });
 });

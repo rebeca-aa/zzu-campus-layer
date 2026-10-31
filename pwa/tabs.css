@@ -1204,3 +1204,39 @@ button.primary.wide {
   line-height: 1.55;
   color: var(--dim);
 }
+
+/* 房间四级选择：下拉框跟输入框一个皮 */
+.picker {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+}
+.picker .field > span {
+  flex: 0 0 42px;
+}
+.picker .field select {
+  flex: 1 1 auto;
+  min-width: 0;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, .04);
+  color: var(--text);
+  padding: 9px 11px;
+  font: 13.5px/1.4 inherit;
+  appearance: none;
+  -webkit-appearance: none;
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--dim) 50%),
+    linear-gradient(135deg, var(--dim) 50%, transparent 50%);
+  background-position: calc(100% - 18px) 17px, calc(100% - 13px) 17px;
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
+}
+.picker .field select:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+html[data-theme='cream'] .picker .field select {
+  background-color: #fff;
+}
