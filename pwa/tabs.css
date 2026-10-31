@@ -1,4 +1,4 @@
-/* ---------- 底部四栏 + 四页框架 ---------- */
+﻿/* ---------- 底部四栏 + 四页框架 ---------- */
 
 :root {
   --nav-h: 58px;
@@ -250,52 +250,107 @@ header.top .acts {
   padding: 6px 0 2px;
 }
 
-/* 主页：三个入口 */
+/* 主页：三个入口（浅色卡片 + 小图标，三种配色各不一样） */
 .tiles {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: 10px;
 }
 .tile {
-  background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: 14px;
-  padding: 11px 11px 10px;
+  position: relative;
+  overflow: hidden;
+  border: 1px solid transparent;
+  border-radius: 18px;
+  padding: 12px 12px 13px;
+  min-height: 104px;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
   text-align: left;
-  color: var(--text);
   cursor: pointer;
   min-width: 0;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, .18);
+  transition: transform .12s ease, filter .12s ease;
 }
 .tile:active {
-  border-color: var(--accent);
+  transform: scale(.98);
+  filter: brightness(.97);
 }
-.tile .sq {
-  width: 26px;
-  height: 26px;
-  border-radius: 8px;
-  background: #000;
+/* 右上角一团高光，像贴了张浅色画 */
+.tile::after {
+  content: '';
+  position: absolute;
+  top: -26px;
+  right: -22px;
+  width: 92px;
+  height: 92px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 35%, rgba(255, 255, 255, .75), rgba(255, 255, 255, 0) 70%);
+  pointer-events: none;
+}
+.tile .art {
+  position: absolute;
+  top: 11px;
+  left: 12px;
+  width: 28px;
+  height: 28px;
+  border-radius: 10px;
+  display: grid;
+  place-items: center;
+  background: rgba(255, 255, 255, .72);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, .1);
+}
+.tile .art svg {
+  width: 16px;
+  height: 16px;
 }
 .tile .t {
-  margin-top: 8px;
-  font-size: 13.5px;
+  font-size: 11.5px;
   font-weight: 600;
+  letter-spacing: .02em;
+  opacity: .74;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 .tile .s {
-  font-size: 12px;
-  color: var(--dim);
-  margin-top: 1px;
+  font-size: 13px;
+  font-weight: 700;
+  margin-top: 2px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 .tile .s.ok {
-  color: var(--ok);
+  color: #1c7d4d;
 }
 .tile .s.warn {
-  color: var(--warn);
+  color: #a4611a;
+}
+
+/* 图书馆：薄荷绿 */
+.tile-lib {
+  background: linear-gradient(158deg, #eefaf1 0%, #d9f0e1 48%, #c2e6cf 100%);
+  color: #14532d;
+}
+.tile-lib .art {
+  color: #1f7a4d;
+}
+/* 空教室：雾蓝 */
+.tile-room {
+  background: linear-gradient(158deg, #eef4ff 0%, #dbe7fd 48%, #c6d8fb 100%);
+  color: #1e3a8a;
+}
+.tile-room .art {
+  color: #2952a8;
+}
+/* 校园卡：暖杏 */
+.tile-card {
+  background: linear-gradient(158deg, #fff7ec 0%, #ffe8cc 48%, #ffd6a8 100%);
+  color: #7c2d12;
+}
+.tile-card .art {
+  color: #b45309;
 }
 
 /* 主页：最新一条通知 */
@@ -801,4 +856,100 @@ header.top .acts {
 .subpage .nb-head .nb-head-title {
   display: none;
 }
+
+/* 切页：旧页留一张快照原地淡出，新页从下方 14px 浮上来，交叉淡入（参照参考视频） */
+.app {
+  position: relative;
+}
+.page-live {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.page-snapshot {
+  position: absolute;
+  inset: 0;
+  z-index: 12;
+  pointer-events: none;
+  opacity: 0;
+  display: flex;
+  flex-direction: column;
+}
+.page-snapshot > * {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.page-snapshot.fade-out {
+  animation: snap-out 0.3s ease-out forwards;
+}
+@keyframes snap-out {
+  from {
+    opacity: 1;
+    transform: scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: scale(1.006);
+  }
+}
+.page-live {
+  animation: page-in 0.3s cubic-bezier(0.22, 0.61, 0.36, 1) both;
+}
+@keyframes page-in {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 18px, 0);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .page-live,
+  .page-snapshot.fade-out {
+    animation: none !important;
+  }
+}
+
+/* 学期课表：左右滑换周（拖动跟手，松手换周或弹回） */
+.grid-wrap {
+  touch-action: pan-y;
+  will-change: transform;
+  transition: transform 0.18s ease-out;
+}
+.grid-wrap.flip-left {
+  animation: week-in-left 0.26s ease-out both;
+}
+.grid-wrap.flip-right {
+  animation: week-in-right 0.26s ease-out both;
+}
+@keyframes week-in-left {
+  from {
+    opacity: 0.35;
+    transform: translate3d(26px, 0, 0);
+  }
+}
+@keyframes week-in-right {
+  from {
+    opacity: 0.35;
+    transform: translate3d(-26px, 0, 0);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .grid-wrap {
+    transition: none;
+  }
+  .grid-wrap.flip-left,
+  .grid-wrap.flip-right {
+    animation: none;
+  }
+}
+.grid-wrap.dragging {
+  transition: none;
+}
+
+
+/* 拖动时顶部预览的目标周次 */
+.weekbar b.preview { color: var(--accent); }
 

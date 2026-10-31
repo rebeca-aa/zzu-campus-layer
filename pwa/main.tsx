@@ -386,7 +386,7 @@ const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
           ]),
         );
         setNavDir('fwd');
-        setSheet('login');
+        openLogin();
         return;
       }
       /* 开销很小：只剩 0 次续期机会时也照样先问一次（用户可能刚在别处续过） */
@@ -397,7 +397,7 @@ const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
         if (!ok) {
           /* 续不上就把人送到登录面板，别让他对着报错猜 */
           setNavDir('fwd');
-          setSheet('login');
+          openLogin();
           setNote('自动续期没成功，请重新登录一次');
         } else {
           session = await loadSession();
@@ -427,7 +427,7 @@ const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
         } else {
           setNote('自动续期没成功，请重新登录一次');
           setNavDir('fwd');
-          setSheet('login');
+          openLogin();
         }
       }
       setMessages((m) =>
@@ -482,7 +482,7 @@ const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
         const next = await importTokenBundle(needPortal(bundle));
         setStatuses(next);
         setLlm(await getLlmSettings());
-        setSheet('none');
+        stepBack();
         setNote('登录态已导入');
         setTimeout(() => setNote(''), 2500);
         return 'ok';
@@ -490,7 +490,7 @@ const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
         const msg = e instanceof Error ? e.message : String(e);
         /* 失败时把面板打开，否则用户只看到「已交给页面处理」 */
         setNavDir('fwd');
-        setSheet('login');
+        openLogin();
         setNote(msg);
         return msg;
       }
@@ -518,7 +518,7 @@ const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
       setStatuses(next);
       setLlm(await getLlmSettings());
       setPaste('');
-      setSheet('none');
+      stepBack();
       setNote(bundle.llm?.apiKey ? '导入成功（含模型 key）' : '导入成功');
       setTimeout(() => setNote(''), 2500);
     } catch (e) {
@@ -535,7 +535,7 @@ const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
       setStatuses(next);
       setLlm(await getLlmSettings());
       setPaste('');
-      setSheet('none');
+      stepBack();
       setNote(bundle.llm?.apiKey ? '导入成功（含模型 key）' : '导入成功');
       setTimeout(() => setNote(''), 2500);
     } catch (e) {
@@ -774,65 +774,151 @@ const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
   /* 通知是盖在当前页上的二级页：再点一次铃铛就收起来，回来还是原来那一栏 */
   const closeNotices = (dir: 'fwd' | 'back' = 'back') => {
     setNavDir(dir);
-    setView('chat');
-    setTab(noticeFrom);
+    stepBack();
   };
   const openNotices = () => {
-    if (view === 'notices') {
-      closeNotices();
-      return;
-    }
+    /* 铃铛只负责「打开」，关闭统一走返回条 / 手机返回键，避免点一下又关掉让人以为没反应 */
+    mark();
     setNoticeFrom(tab);
     setNavDir('fwd');
     setView('notices');
     if (noticeCards.length === 0 && !noticeBusy) void loadNotices();
   };
 
+  /* 切栏动画：先把当前页克隆一份盖在上面淡出，新页从下方 14px 处浮上来（交叉淡入） */
+  const snapHost = useRef<HTMLDivElement | null>(null);
+  const goTab = (next: TabKey) => {
+    if (next === tab) return;
+    const host = snapHost.current;
+    const current = document.querySelector('.app > .page-live');
+    if (host && current) {
+      const clone = current.cloneNode(true) as HTMLElement;
+      clone.classList.remove('page-live');
+      /* 快照要跟着原页的滚动位置，否则长列表会"跳回顶部" */
+      const srcBodies = current.querySelectorAll('.tabbody');
+      const cloneBodies = clone.querySelectorAll('.tabbody');
+      srcBodies.forEach((el, i) => {
+        const target = cloneBodies[i] as HTMLElement | undefined;
+        if (target) {
+          target.style.overflow = 'hidden';
+          target.scrollTop = (el as HTMLElement).scrollTop;
+        }
+      });
+      clone.querySelectorAll('button, input, textarea, a').forEach((el) => {
+        (el as HTMLElement).setAttribute('tabindex', '-1');
+      });
+      host.replaceChildren(clone);
+      host.classList.remove('fade-out');
+      void host.offsetWidth; /* 强制重排，让动画每次都从头发一遍 */
+      host.classList.add('fade-out');
+    }
+    mark();
+    setTab(next);
+  };
+
+  /* 打开登录面板 / 二级页：都先压栈，返回时才回得来 */
+  const openLogin = () => {
+    mark();
+    setNavDir('fwd');
+    setSheet('login');
+  };
+  const openSub = (which: 'theme' | 'settings' | 'about') => {
+    mark();
+    setNavDir('fwd');
+    setSub(which);
+  };
+
+  /* —— 后退栈：手机返回键 / 侧滑返回应该「退回上一页」，而不是直接退出 App ——
+     规则：往前走的动作（切栏、开二级页）由下面的 effect 自动 push 一条历史；
+     所有「返回」都走 stepBack() → history.back()，由 popstate 把状态还原回来。 */
+  const snapKey = `${tab}|${view}|${sheet}|${sub}`;
+  const stepBack = useCallback(() => {
+    history.back();
+  }, []);
+
+  /* —— 返回栈 ——
+     自己记一份「页面栈」，历史里只保留一条"哨兵"记录：按返回键时把哨兵吃掉，
+     我们从栈里弹上一页出来，然后再布一次防（pushState 哨兵）。
+     栈空了说明已经在根页面，这次就真的让浏览器退出。 */
+  const stack = useRef<string[]>([]);
+
+  /* 跳转前先把「当前在哪」压栈 —— 同步压，避免 effect 迟到一拍导致返回错位 */
+  const mark = useCallback(() => {
+    stack.current.push(`${tab}|${view}|${sheet}|${sub}`);
+    if (stack.current.length > 40) stack.current.shift();
+  }, [tab, view, sheet, sub]);
+
+  useEffect(() => {
+    const arm = () => history.pushState({ dsh: 1 }, '');
+    arm();
+    const onPop = () => {
+      const prev = stack.current.pop();
+      if (!prev) return; /* 到根了：这次不放哨兵，交给系统退出 */
+      arm(); /* 每次都重新布防，否则下一次返回就真的退出去了 */
+      const [t, v, s, b] = prev.split('|');
+      setNavDir('back');
+      setTab((t as TabKey) || 'home');
+      setView(v === 'notices' ? 'notices' : 'chat');
+      setSheet(s === 'login' ? 'login' : 'none');
+      setSub(b === 'theme' || b === 'settings' || b === 'about' ? b : 'none');
+    };
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
+    /* 只挂一次 */
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   return (
-    <div class="app">
+    <div class="app" data-view={view} data-tab={tab} data-sub={sub} data-sheet={sheet}>
+      <div class="page-snapshot" ref={snapHost} aria-hidden="true" />
       {tab === 'home' && (
-        <HomeView
-          today={today}
-          call={call}
-          refreshKey={homeRefresh}
-          busy={homeBusy}
-          unread={unread}
-          onOpen={(kind) => {
-            /* 没登录就先让用户登录，别问一句再被回「还没 token」 */
-            if (!jwxt?.valid) {
+        <div class="page-live" key="home">
+          <HomeView
+            today={today}
+            call={call}
+            refreshKey={homeRefresh}
+            busy={homeBusy}
+            unread={unread}
+            onOpen={(kind) => {
+              /* 没登录就先让用户登录，别问一句再被回「还没 token」 */
+              if (!jwxt?.valid) {
+                setNavDir('fwd');
+                openLogin();
+                return;
+              }
+              if (kind === 'library') {
+                setNavDir('fwd');
+                goTab('ai');
+                void submit('图书馆还有位置吗');
+                return;
+              }
+              if (kind === 'rooms') {
+                setNavDir('fwd');
+                goTab('ai');
+                void submit('今天的空教室');
+                return;
+              }
               setNavDir('fwd');
-              setSheet('login');
-              return;
-            }
-            if (kind === 'library') {
-              setNavDir('fwd');
-              setTab('ai');
-              void submit('图书馆还有位置吗');
-              return;
-            }
-            if (kind === 'rooms') {
-              setNavDir('fwd');
-              setTab('ai');
-              void submit('今天的空教室');
-              return;
-            }
-            setNavDir('fwd');
-            setTab('ai');
-            void submit('我卡里还有多少钱');
-          }}
-          onSchedule={() => setTab('schedule')}
-          onBell={openNotices}
-          onNotice={openNotices}
-          onRefresh={refreshHome}
-        />
+              goTab('ai');
+              void submit('我卡里还有多少钱');
+            }}
+            onSchedule={() => goTab('schedule')}
+            onBell={openNotices}
+            onNotice={openNotices}
+            onRefresh={refreshHome}
+          />
+        </div>
       )}
 
       {tab === 'schedule' && (
-        <ScheduleView call={call} term={term} today={today} refreshKey={homeRefresh} />
+        <div class="page-live" key="schedule">
+          <ScheduleView call={call} term={term} today={today} refreshKey={homeRefresh} />
+        </div>
       )}
 
       {tab === 'mine' && (
-        <MineView
+        <div class="page-live" key="mine">
+          <MineView
           version={buildVersion}
           themeLabel={themeLabel}
           jwtText={jwxt ? (jwxt.valid ? (jwxt.remainingText ?? '可用') : '已过期') : '未登录'}
@@ -843,7 +929,7 @@ const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
           renewBusy={renewBusy}
           onLogin={() => {
             setNavDir('fwd');
-            setSheet('login');
+            openLogin();
           }}
           onLibraryLogin={() => {
             const b = (window as unknown as { CampusNotify?: { loginLibrary?: () => void } }).CampusNotify;
@@ -855,27 +941,28 @@ const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
           onToggleNews={(v) => void toggleNews(v)}
           onTheme={() => {
             setNavDir('fwd');
-            setSub('theme');
+            openSub('theme');
           }}
           onSettings={() => {
             setNavDir('fwd');
-            setSub('settings');
+            openSub('settings');
           }}
           onAbout={() => {
             setNavDir('fwd');
-            setSub('about');
+            openSub('about');
           }}
         />
+        </div>
       )}
 
       {tab === 'ai' && (
-        <header class="top">
-          <div class="who">
-            <h1>AI</h1>
-            <div class="sub">问课表、空教室、图书馆、校园卡</div>
-          </div>
-        </header>
-      )}
+        <div class="page-live" key="ai">
+          <header class="top">
+            <div class="who">
+              <h1>AI</h1>
+              <div class="sub">问课表、空教室、图书馆、校园卡</div>
+            </div>
+          </header>
 
       {sheet === 'login' && (
         <section class={`subpage${slide}`} key="login">
@@ -883,7 +970,7 @@ const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
             <button
               onClick={() => {
                 setNavDir('back');
-                setSheet('none');
+                stepBack();
               }}
             >
               ‹ 返回
@@ -1044,33 +1131,6 @@ const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
         </section>
       )}
 
-      {view === 'notices' && (
-        <section class={`subpage${slide}`} key="notices">
-          <div class="subhead">
-            <button
-              onClick={() => {
-                closeNotices();
-              }}
-            >
-              ‹ 返回
-            </button>
-            <strong>通知</strong>
-          </div>
-          <NoticeBoard
-            cards={noticeCards}
-            digest={noticeDigest}
-            prefs={noticePrefs}
-            today={today}
-            loading={noticeBusy}
-            error={noticeError}
-            onRefresh={() => void loadNotices()}
-            onRead={(id) => void readNotice(id)}
-            onIcs={saveNoticeIcs}
-            onDetail={loadNoticeDetail}
-            onToggleCategory={(category) => void toggleCategory(category)}
-          />
-        </section>
-      )}
 
       {tab === 'ai' && view === 'chat' && (
         <main
@@ -1151,7 +1211,7 @@ const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
       </main>
       )}
 
-      {tab === 'ai' && view === 'chat' && sheet === 'none' && (
+      {view === 'chat' && sheet === 'none' && (
         <>
           <div class="dock">
         <img class="deco" src="./deco.png" alt="" aria-hidden="true" />
@@ -1194,6 +1254,8 @@ const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
         </div>
         </>
       )}
+        </div>
+      )}
 
       {sub === 'theme' && (
         <section class={`subpage${slide}`} key="theme">
@@ -1201,7 +1263,7 @@ const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
             <button
               onClick={() => {
                 setNavDir('back');
-                setSub('none');
+                stepBack();
               }}
             >
               ‹ 返回
@@ -1243,7 +1305,7 @@ const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
             <button
               onClick={() => {
                 setNavDir('back');
-                setSub('none');
+                stepBack();
               }}
             >
               ‹ 返回
@@ -1281,7 +1343,7 @@ const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
             <button
               onClick={() => {
                 setNavDir('back');
-                setSub('none');
+                stepBack();
               }}
             >
               ‹ 返回
@@ -1323,12 +1385,47 @@ const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
         </section>
       )}
 
+      {view === 'notices' && (
+        <section class={`subpage${slide}`} key="notices">
+          <div class="subhead">
+            <button
+              onClick={() => {
+                closeNotices();
+              }}
+            >
+              ‹ 返回
+            </button>
+            <strong>通知</strong>
+          </div>
+          <NoticeBoard
+            cards={noticeCards}
+            digest={noticeDigest}
+            prefs={noticePrefs}
+            today={today}
+            loading={noticeBusy}
+            error={noticeError}
+            onRefresh={() => void loadNotices()}
+            onRead={(id) => void readNotice(id)}
+            onIcs={saveNoticeIcs}
+            onDetail={loadNoticeDetail}
+            onToggleCategory={(category) => void toggleCategory(category)}
+          />
+        </section>
+      )}
+
       <TabBar
         tab={tab}
         onTab={(next) => {
-          setSub('none');
-          setView('chat');
-          setTab(next);
+          /* 二级页盖着时点底栏＝直接去那一栏（把它当一次前进，返回还能回到二级页） */
+          if (sub !== 'none' || sheet !== 'none' || view !== 'chat') {
+            mark();
+            setView('chat');
+            setSub('none');
+            setSheet('none');
+            setTab(next);
+            return;
+          }
+          goTab(next);
         }}
       />
 

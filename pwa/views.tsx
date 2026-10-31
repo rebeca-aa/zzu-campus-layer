@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'preact/hooks';
+import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import type { Course, Term } from '../src/core/types';
 
 export type TabKey = 'home' | 'ai' | 'schedule' | 'mine';
@@ -237,20 +237,38 @@ export function HomeView(props: {
         </section>
 
         <div class="tiles">
-          <button class="tile" onClick={() => props.onOpen('library')}>
-            <span class="sq" />
+          <button class="tile tile-lib" onClick={() => props.onOpen('library')}>
+            <span class="art" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 7c-1.6-1.3-3.7-2-6.2-2H4v12.5h1.8c2.5 0 4.6.7 6.2 2 1.6-1.3 3.7-2 6.2-2H20V5h-1.8C15.7 5 13.6 5.7 12 7z" />
+                <path d="M12 7v12.5" />
+              </svg>
+            </span>
             <div class="t">图书馆</div>
             <div class={`s ${tiles.library?.tone ?? ''}`}>
               {needLogin ? '登录后看' : tiles.library?.text ?? '…'}
             </div>
           </button>
-          <button class="tile" onClick={() => props.onOpen('rooms')}>
-            <span class="sq" />
+          <button class="tile tile-room" onClick={() => props.onOpen('rooms')}>
+            <span class="art" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="3.5" y="4.5" width="17" height="15" rx="2.5" />
+                <path d="M3.5 9.5h17" />
+                <path d="M8.5 4.5v5M15.5 4.5v5" />
+                <path d="M8 14h3M8 16.5h6" />
+              </svg>
+            </span>
             <div class="t">空教室</div>
             <div class={`s ${tiles.rooms?.tone ?? ''}`}>{needLogin ? '登录后看' : tiles.rooms?.text ?? '…'}</div>
           </button>
-          <button class="tile" onClick={() => props.onOpen('card')}>
-            <span class="sq" />
+          <button class="tile tile-card" onClick={() => props.onOpen('card')}>
+            <span class="art" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="3" y="6" width="18" height="12.5" rx="2.6" />
+                <path d="M3 10.5h18" />
+                <path d="M6.5 15h3.5" />
+              </svg>
+            </span>
             <div class="t">校园卡</div>
             <div class="s">{needLogin ? '登录后看' : tiles.card?.text ?? '…'}</div>
           </button>
@@ -370,6 +388,19 @@ export function ScheduleView(props: {
   const [err, setErr] = useState('');
   const colorMap = useMemo(() => assignColors(courses), [courses]);
 
+  /* 左右滑换周：拖动时跟手，松手超过 56px 就换周，否则弹回 */
+  const [dragX, setDragX] = useState(0);
+  const [flip, setFlip] = useState<'' | 'left' | 'right'>('');
+  const drag = useRef<{ x: number; y: number; live: boolean; locked: boolean } | null>(null);
+  const flipTimer = useRef<number | undefined>(undefined);
+
+  const goWeek = (dir: -1 | 1) => {
+    setFlip(dir > 0 ? 'left' : 'right');
+    setWeek((w) => Math.min(maxWeek, Math.max(minWeek, w + dir)));
+    window.clearTimeout(flipTimer.current);
+    flipTimer.current = window.setTimeout(() => setFlip(''), 280);
+  };
+
   useEffect(() => {
     if (term?.currentWeek) setWeek(term.currentWeek);
   }, [term?.currentWeek]);
@@ -403,6 +434,10 @@ export function ScheduleView(props: {
   const dayDates = Array.from({ length: 7 }, (_, i) => addDays(monday, i));
   const todayIdx = dayDates.indexOf(today);
 
+  /* 拖动时顶部先预览「松手会到第几周」 */
+  const previewWeek =
+    dragX <= -56 ? Math.min(maxWeek, week + 1) : dragX >= 56 ? Math.max(minWeek, week - 1) : week;
+
   return (
     <>
       <header class="top">
@@ -415,20 +450,63 @@ export function ScheduleView(props: {
       </header>
       <main class="tabbody">
         <div class="weekbar">
-          <button onClick={() => setWeek((w) => Math.max(minWeek, w - 1))} disabled={week <= minWeek}>
+          <button onClick={() => goWeek(-1)} disabled={week <= minWeek} aria-label="上一周">
             ‹
           </button>
           <span>
-            <b>第 {week} 周</b> / 共 {maxWeek} 周
+            <b class={previewWeek !== week ? 'preview' : ''}>第 {previewWeek} 周</b> / 共 {maxWeek} 周
           </span>
-          <button onClick={() => setWeek((w) => Math.min(maxWeek, w + 1))} disabled={week >= maxWeek}>
+          <button onClick={() => goWeek(1)} disabled={week >= maxWeek} aria-label="下一周">
             ›
           </button>
         </div>
 
         {err && <p class="empty-line">{err}</p>}
 
-        <div class="grid">
+        <div
+          class={`grid-wrap${dragX ? ' dragging' : ''}${flip ? ` flip-${flip}` : ''}`}
+          style={dragX ? `transform:translate3d(${dragX}px,0,0)` : ''}
+          title="左右滑动换周"
+          onPointerDown={(e) => {
+            if (e.pointerType === 'mouse' && e.button !== 0) return;
+            drag.current = { x: e.clientX, y: e.clientY, live: true, locked: false };
+          }}
+          onPointerMove={(e) => {
+            const d = drag.current;
+            if (!d?.live) return;
+            const mx = e.clientX - d.x;
+            const my = e.clientY - d.y;
+            if (!d.locked) {
+              if (Math.abs(mx) < 10 && Math.abs(my) < 10) return;
+              /* 竖着划就让页面滚，横着划才接管 */
+              if (Math.abs(mx) <= Math.abs(my) * 1.2) {
+                d.live = false;
+                return;
+              }
+              d.locked = true;
+              (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
+            }
+            const atMin = week <= minWeek && mx > 0;
+            const atMax = week >= maxWeek && mx < 0;
+            setDragX(atMin || atMax ? mx * 0.28 : mx);
+          }}
+          onPointerUp={() => {
+            const d = drag.current;
+            drag.current = null;
+            if (!d?.locked) {
+              setDragX(0);
+              return;
+            }
+            if (dragX <= -56 && week < maxWeek) goWeek(1);
+            else if (dragX >= 56 && week > minWeek) goWeek(-1);
+            setDragX(0);
+          }}
+          onPointerCancel={() => {
+            drag.current = null;
+            setDragX(0);
+          }}
+        >
+          <div class="grid">
           <div />
           {['一', '二', '三', '四', '五', '六', '日'].map((d, i) => (
             <div class={`dow${i === todayIdx ? ' today' : ''}`} key={d}>
@@ -457,6 +535,7 @@ export function ScheduleView(props: {
               </div>
             );
           })}
+          </div>
         </div>
         {loading && <p class="empty-line">读课表中…</p>}
         {!loading && !err && courses.length === 0 && <p class="empty-line">这周没有课。</p>}
