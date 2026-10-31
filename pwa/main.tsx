@@ -2,7 +2,7 @@ import { render } from 'preact';
 
 declare const __APP_VERSION__: string;
 import { HoldButton } from '../src/ui/hold';
-import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { ask } from '../src/core/agent';
 import { getKV, parseImportLink } from '../src/core/kv';
 import { probeLlm } from '../src/core/llm';
@@ -43,8 +43,12 @@ import {
 } from '../src/core/noticeStore';
 import { getNoticeBody, runTool } from '../src/core/tools';
 import { todayShanghai } from '../src/core/util';
+import type { Term } from '../src/core/types';
 import { NoticeBoard } from '../src/ui/notice';
+import { HomeView, MineView, ScheduleView, TabBar, type Caller, type TabKey } from './views';
+import { fetchRelease, SEEN_KEY, shouldAnnounce, type Release } from './update';
 import './style.css';
+import './tabs.css';
 
 interface Message {
   role: 'user' | 'assistant';
@@ -92,10 +96,21 @@ function syncThemeMeta(next: ThemeName): void {
 }
 
 function App() {
-  const [statuses, setStatuses] = useState<TokenStatus[]>([]);
-  const [messages, setMessages] = useState<Message[]>([]);
+  const [statuses, setStatuses] = useState<TokenStatus[]>([]);  const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
+  /* 底部四栏：主页 / AI / 学期课表 / 我的 */
+  const [tab, setTab] = useState<TabKey>('home');
+  /* 我的下面的二级页 */
+  const [sub, setSub] = useState<'none' | 'theme' | 'settings' | 'about'>('none');
+  const [term, setTerm] = useState<Term | null>(null);
+  const [homeRefresh, setHomeRefresh] = useState(0);
+  const [homeBusy, setHomeBusy] = useState(false);
+  /* 新版本已就绪（等用户点「立即更新」）与「刚更新完」的公告 */
+  const [updateReady, setUpdateReady] = useState(false);
+  const [updateNotes, setUpdateNotes] = useState<string[]>([]);
+  const [announce, setAnnounce] = useState<Release | null>(null);
+  const swReg = useRef<ServiceWorkerRegistration | null>(null);
   const [sheet, setSheet] = useState<'none' | 'login'>('none');
   /* 面板切换方向：fwd = 新面板从右边滑进来，back = 退回时从左边滑回来 */
   const [navDir, setNavDir] = useState<'fwd' | 'back'>('fwd');
@@ -283,25 +298,23 @@ const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
   useEffect(() => {
     void refresh();
     if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('./pwa-sw.js', { updateViaCache: 'none' }).then((reg) => {
-      void reg.update();
-      reg.addEventListener('updatefound', () => {
-        const sw = reg.installing;
-        if (!sw) return;
-        sw.addEventListener('statechange', () => {
-          if (sw.state === 'installed' && navigator.serviceWorker.controller) {
-            try {
-              if (!sessionStorage.getItem('sw-reloaded')) {
-                sessionStorage.setItem('sw-reloaded', '1');
-                location.reload();
-              }
-            } catch {
-              /* 无痕/隐私模式忽略 */
-            }
-          }
-        });
-      });
-    }).catch(() => undefined);
+      navigator.serviceWorker
+        .register('./pwa-sw.js', { updateViaCache: 'none' })
+        .then((reg) => {
+          swReg.current = reg;
+          void reg.update();
+          /* 已经装好、只是等着接管的那种，一进来就提示 */
+          if (reg.waiting && navigator.serviceWorker.controller) void offerUpdate();
+          reg.addEventListener('updatefound', () => {
+            const sw = reg.installing;
+            if (!sw) return;
+            sw.addEventListener('statechange', () => {
+              /* 装好但先不接管：弹窗等用户点「立即更新」 */
+              if (sw.state === 'installed' && navigator.serviceWorker.controller) void offerUpdate();
+            });
+          });
+        })
+        .catch(() => undefined);
     }
     // 装了安卓壳的话，每次打开都把未来 7 天的课前提醒重排一遍
     void syncReminders();
@@ -674,51 +687,203 @@ const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
   /** 面板进出动画用的类名：开新面板从右边滑入，退回从左边滑入 */
   const slide = booted ? (navDir === 'fwd' ? ' slide-in-right' : ' slide-in-left') : '';
 
+  /** 各页面统一走这个：拿会话 → 跑工具 → 兜住错误，返回给人看的一句话 */
+  const call = useCallback<Caller>(async (name, args = {}) => {
+    try {
+      const session = await loadSession();
+      if (!session.jwxtToken && !session.portalToken) {
+        return { ok: false, error: '还没登录：去「我的 → 账号」登录一次' };
+      }
+      const out = await runTool(name as Parameters<typeof runTool>[0], args, new CampusService(session));
+      return { ok: true, data: out };
+    } catch (e) {
+      return { ok: false, error: e instanceof Error ? e.message : String(e) };
+    }
+  }, []);
+
+  /* 学期信息：总周数、当前第几周 */
+  useEffect(() => {
+    let alive = true;
+    void (async () => {
+      try {
+        const session = await loadSession();
+        if (!session.jwxtToken && !session.portalToken) return;
+        const t = await new CampusService(session).term();
+        if (alive) setTerm(t);
+      } catch {
+        /* 没登录 / 断网就先不显示周次 */
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [homeRefresh]);
+
+  const refreshHome = useCallback(() => {
+    setHomeBusy(true);
+    setHomeRefresh((n) => n + 1);
+    void tokenStatuses().then(setStatuses);
+    window.setTimeout(() => setHomeBusy(false), 800);
+  }, []);
+
+  const themeLabel = theme === 'cream' ? '米白' : theme === 'teal' ? '蓝绿' : '藏青';
+
+  /* 有新版本装好了：弹窗，并把这次更新的说明一起拿出来 */
+  const offerUpdate = useCallback(() => {
+    setUpdateReady(true);
+    void fetchRelease().then((r) => setUpdateNotes(r?.notes ?? []));
+  }, []);
+
+  const applyUpdate = useCallback(() => {
+    const reg = swReg.current;
+    if (!reg?.waiting) {
+      location.reload();
+      return;
+    }
+    navigator.serviceWorker.addEventListener('controllerchange', () => location.reload(), { once: true });
+    reg.waiting.postMessage({ type: 'SKIP_WAITING' });
+  }, []);
+
+  /* 更新完第一次跑：如果这个版本还没公告过，就把这次更新说明弹一次 */
+  useEffect(() => {
+    if (!buildVersion) return;
+    let seen: string | null = null;
+    try {
+      seen = localStorage.getItem(SEEN_KEY);
+    } catch {
+      /* 隐私模式拿不到就算了 */
+    }
+    if (shouldAnnounce(buildVersion, seen)) {
+      void fetchRelease().then((r) => {
+        if (r && r.version === buildVersion) setAnnounce(r);
+      });
+    }
+    try {
+      localStorage.setItem(SEEN_KEY, buildVersion);
+    } catch {
+      /* 同上 */
+    }
+  }, []);
+
+  const unread = noticeCards.filter((c) => !noticePrefs.readIds.includes(c.id)).length;
+  const openNotices = () => {
+    setNavDir('fwd');
+    setTab('ai');
+    setView('notices');
+    if (noticeCards.length === 0 && !noticeBusy) void loadNotices();
+  };
+
   return (
     <div class="app">
-      <header>
-        <h1>
-              <svg class="mark" viewBox="0 0 24 24" width="17" height="17" aria-hidden="true">
-                <path
-                  d="M12 1.6c.55 4.55 2.7 6.7 7.25 7.25-4.55.55-6.7 2.7-7.25 7.25-.55-4.55-2.7-6.7-7.25-7.25C9.7 8.3 11.45 6.15 12 1.6z"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="2.1"
-                  stroke-linejoin="round"
-                />
-              </svg>
-            </h1>
-        <div class="chips">
-          <button
-            class={`chip${view === 'notices' ? ' on' : ''}`}
-            onClick={() => {
-              if (view === 'notices') {
-                setNavDir('back');
-                setView('chat');
-                return;
-              }
+      {tab === 'home' && (
+        <HomeView
+          today={today}
+          call={call}
+          refreshKey={homeRefresh}
+          busy={homeBusy}
+          unread={unread}
+          onOpen={(kind) => {
+            /* 没登录就先让用户登录，别问一句再被回「还没 token」 */
+            if (!jwxt?.valid) {
               setNavDir('fwd');
-              setView('notices');
-              if (noticeCards.length === 0 && !noticeBusy) void loadNotices();
-            }}
-          >
-            {view === 'notices' ? '问答' : '通知'}
-          </button>
-          <button
-            class="chip"
-            onClick={() => {
-              const open = sheet === 'login';
-              setNavDir(open ? 'back' : 'fwd');
-              setSheet(open ? 'none' : 'login');
-            }}
-          >
-            {ready ? `教务 ${jwxt?.remainingText ?? '—'}` : '登录态'}
-          </button>
-        </div>
-      </header>
+              setSheet('login');
+              return;
+            }
+            if (kind === 'library') {
+              setNavDir('fwd');
+              setTab('ai');
+              void submit('图书馆还有位置吗');
+              return;
+            }
+            if (kind === 'rooms') {
+              setNavDir('fwd');
+              setTab('ai');
+              void submit('今天的空教室');
+              return;
+            }
+            setNavDir('fwd');
+            setTab('ai');
+            void submit('我卡里还有多少钱');
+          }}
+          onSchedule={() => setTab('schedule')}
+          onBell={openNotices}
+          onNotice={openNotices}
+          onRefresh={refreshHome}
+        />
+      )}
+
+      {tab === 'schedule' && (
+        <ScheduleView call={call} term={term} today={today} refreshKey={homeRefresh} />
+      )}
+
+      {tab === 'mine' && (
+        <MineView
+          version={buildVersion}
+          themeLabel={themeLabel}
+          jwtText={jwxt ? (jwxt.valid ? (jwxt.remainingText ?? '可用') : '已过期') : '未登录'}
+          portalText={portal ? (portal.valid ? (portal.remainingText ?? '可用') : '已过期') : '未登录'}
+          notifyClass={notifyClass}
+          notifyNews={notifyNews}
+          hasShell={inShell}
+          renewBusy={renewBusy}
+          onLogin={() => {
+            setNavDir('fwd');
+            setSheet('login');
+          }}
+          onLibraryLogin={() => {
+            const b = (window as unknown as { CampusNotify?: { loginLibrary?: () => void } }).CampusNotify;
+            if (b?.loginLibrary) b.loginLibrary();
+            else window.open(LIB_LOGIN, '_blank', 'noreferrer');
+          }}
+          onRenew={() => void doRenew()}
+          onToggleClass={(v) => void toggleClass(v)}
+          onToggleNews={(v) => void toggleNews(v)}
+          onTheme={() => {
+            setNavDir('fwd');
+            setSub('theme');
+          }}
+          onSettings={() => {
+            setNavDir('fwd');
+            setSub('settings');
+          }}
+          onAbout={() => {
+            setNavDir('fwd');
+            setSub('about');
+          }}
+        />
+      )}
+
+      {tab === 'ai' && (
+        <header class="top">
+          <div class="who">
+            <h1>AI</h1>
+            <div class="sub">问课表、空教室、图书馆、校园卡</div>
+          </div>
+          <div class="acts">
+            <button class="iconbtn" onClick={openNotices} aria-label="通知">
+              {unread > 0 && <span class="dot">{unread > 99 ? '99+' : unread}</span>}
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M18 8a6 6 0 1 0-12 0c0 5-2 6-2 6h16s-2-1-2-6" />
+                <path d="M13.7 17a2 2 0 0 1-3.4 0" />
+              </svg>
+            </button>
+          </div>
+        </header>
+      )}
 
       {sheet === 'login' && (
-        <section class={`sheet${slide}`} key="login">
+        <section class={`subpage${slide}`} key="login">
+          <div class="subhead">
+            <button
+              onClick={() => {
+                setNavDir('back');
+                setSheet('none');
+              }}
+            >
+              ‹ 返回
+            </button>
+            <strong>账号</strong>
+          </div>
           {inShell ? (
             <>
               <p class="hint">
@@ -873,8 +1038,19 @@ const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
         </section>
       )}
 
-      {view === 'notices' ? (
-        <main class={`notices-main${slide}`} key="notices">
+      {view === 'notices' && (
+        <section class={`subpage${slide}`} key="notices">
+          <div class="subhead">
+            <button
+              onClick={() => {
+                setNavDir('back');
+                setView('chat');
+              }}
+            >
+              ‹ 返回
+            </button>
+            <strong>通知</strong>
+          </div>
           <NoticeBoard
             cards={noticeCards}
             digest={noticeDigest}
@@ -888,11 +1064,13 @@ const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
             onDetail={loadNoticeDetail}
             onToggleCategory={(category) => void toggleCategory(category)}
           />
-        </main>
-      ) : (
+        </section>
+      )}
+
+      {tab === 'ai' && view === 'chat' && (
         <main
           ref={scroller}
-          class={slide.trim()}
+          class={`tabbody chat-body ${slide}`}
           key="chat"
           onScroll={(e) => {
             const el = e.currentTarget;
@@ -900,6 +1078,18 @@ const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
           }}
         >
         
+        {messages.length === 0 && (
+          <div class="chat-empty">
+            <p class="ce-title">问点什么？</p>
+            <p class="ce-sub">课表、空教室、图书馆、校园卡，直接用平常话说就行。</p>
+            {(quickAsks.length ? quickAsks.slice(0, 3) : []).map((q) => (
+              <button class="ce-ask" key={q.id} onClick={() => void submit(q.text)}>
+                {q.label}
+              </button>
+            ))}
+          </div>
+        )}
+
         {messages.map((m, i) => (
           <div class={`msg ${m.role}`} key={`${i}-${m.role}`}>
             <div class={m.error ? 'bubble error' : 'bubble'}>
@@ -956,7 +1146,7 @@ const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
       </main>
       )}
 
-      {view === 'chat' && sheet === 'none' && (
+      {tab === 'ai' && view === 'chat' && sheet === 'none' && (
         <>
           <div class="dock">
         <img class="deco" src="./deco.png" alt="" aria-hidden="true" />
@@ -989,7 +1179,7 @@ const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
             <input
               value={input}
               onInput={(e) => setInput((e.target as HTMLInputElement).value)}
-              placeholder=""
+              placeholder="问点什么，比如「明天下午有空的教室吗」"
               enterkeyhint="send"
             />
             <button type="submit" disabled={busy || !input.trim()}>
@@ -998,6 +1188,190 @@ const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
           </form>
         </div>
         </>
+      )}
+
+      {sub === 'theme' && (
+        <section class={`subpage${slide}`} key="theme">
+          <div class="subhead">
+            <button
+              onClick={() => {
+                setNavDir('back');
+                setSub('none');
+              }}
+            >
+              ‹ 返回
+            </button>
+            <strong>外观</strong>
+          </div>
+          <div class="tabbody">
+            <div class="card">
+              <div class="cardhead">
+                <strong>配色</strong>
+                <span>现在：{themeLabel}</span>
+              </div>
+              <div class="theme-pick">
+                {(
+                  [
+                    ['cream', '米白'],
+                    ['ink', '藏青'],
+                    ['teal', '蓝绿'],
+                  ] as const
+                ).map(([key, label]) => (
+                  <button
+                    key={key}
+                    class={`theme-opt${theme === key ? ' on' : ''}`}
+                    onClick={() => void applyTheme(key)}
+                  >
+                    <i class={`sw-${key}`} />
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        </section>
+      )}
+
+      {sub === 'settings' && (
+        <section class={`subpage${slide}`} key="settings">
+          <div class="subhead">
+            <button
+              onClick={() => {
+                setNavDir('back');
+                setSub('none');
+              }}
+            >
+              ‹ 返回
+            </button>
+            <strong>设置</strong>
+          </div>
+          <div class="tabbody">
+            <div class="card">
+              <div class="cardhead">
+                <strong>模型</strong>
+                <span>{llm.enabled ? '兜底已开' : '只用本地规则'}</span>
+              </div>
+              <LlmFields
+                value={llm}
+                httpsPage={isHttps}
+                onChange={(patch) => {
+                  setLlm({ ...llm, ...patch });
+                  void patchLlm(patch);
+                }}
+              />
+              <div class="row">
+                <button class="mini" onClick={() => void testLlm()} disabled={testing}>
+                  {testing ? '测试中…' : '测试连接'}
+                </button>
+              </div>
+              {testNote ? <p class={testNote.startsWith('连通') ? 'hint ok' : 'hint warn'}>{testNote}</p> : null}
+            </div>
+          </div>
+        </section>
+      )}
+
+      {sub === 'about' && (
+        <section class={`subpage${slide}`} key="about">
+          <div class="subhead">
+            <button
+              onClick={() => {
+                setNavDir('back');
+                setSub('none');
+              }}
+            >
+              ‹ 返回
+            </button>
+            <strong>关于</strong>
+          </div>
+          <div class="tabbody">
+            <div class="card">
+              <div class="cardhead">
+                <strong>版本</strong>
+                <span>{buildVersion}</span>
+              </div>
+              <div class="about-row">
+                <span class="k">前端</span>
+                <span class="v">{buildVersion}</span>
+              </div>
+              <div class="about-row">
+                <span class="k">壳桥</span>
+                <span class="v">{inShell ? '可用' : '不可用（浏览器里打开）'}</span>
+              </div>
+              <div class="about-row">
+                <span class="k">数据来源</span>
+                <span class="v">教务 · 门户 · 图书馆 · 一卡通，都是学校自己的接口</span>
+              </div>
+              <div class="about-row">
+                <span class="k">隐私</span>
+                <span class="v">只在本机处理，登录票不上传</span>
+              </div>
+              <div class="about-row">
+                <span class="k">源码</span>
+                <span class="v">
+                  <a class="link" href="https://github.com/rebeca-aa/zzu-campus-layer" target="_blank" rel="noreferrer">
+                    github.com/rebeca-aa/zzu-campus-layer
+                  </a>
+                </span>
+              </div>
+            </div>
+          </div>
+        </section>
+      )}
+
+      <TabBar
+        tab={tab}
+        onTab={(next) => {
+          setSub('none');
+          setView('chat');
+          setTab(next);
+        }}
+      />
+
+      {updateReady && (
+        <div class="dialog-wrap" role="dialog" aria-modal="true">
+          <div class="dialog">
+            <div class="d-title">新版本已就绪</div>
+            <p class="d-sub">刷新一下就是新版。登录态、常用语、聊天记录都留在本机，不会丢。</p>
+            {updateNotes.length > 0 && (
+              <ul class="d-notes">
+                {updateNotes.map((n) => (
+                  <li>{n}</li>
+                ))}
+              </ul>
+            )}
+            <div class="d-actions">
+              <button class="ghost" onClick={() => setUpdateReady(false)}>
+                稍后
+              </button>
+              <button class="primary" onClick={applyUpdate}>
+                立即更新
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {announce && (
+        <div class="dialog-wrap" role="dialog" aria-modal="true">
+          <div class="dialog">
+            <div class="d-title">已经更新到 v{announce.version}</div>
+            <p class="d-sub">这次改了这些：</p>
+            {announce.notes.length > 0 ? (
+              <ul class="d-notes">
+                {announce.notes.map((n) => (
+                  <li>{n}</li>
+                ))}
+              </ul>
+            ) : (
+              <p class="d-sub">（这版没有写更新说明）</p>
+            )}
+            <div class="d-actions">
+              <button class="primary" onClick={() => setAnnounce(null)}>
+                知道了
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

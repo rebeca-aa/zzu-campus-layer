@@ -1,0 +1,787 @@
+/* ---------- 底部四栏 + 四页框架 ---------- */
+
+:root {
+  --nav-h: 58px;
+  --dock-h: 104px;
+}
+
+/* 老样式表为了去掉旧顶栏把 header 里的 h1 整个藏了，新顶栏要用回来 */
+header.top h1 {
+  display: block !important;
+}
+
+/* 深色两套主题没定义 --line（沿用米白的 #f4ebd7），新卡片会描出米黄边 */
+html[data-theme='ink'],
+html[data-theme='teal'] {
+  --line: var(--hairline);
+}
+
+/* 页面主体：四栏之下留出导航高度 */
+.tabbody {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: none;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px 16px calc(var(--nav-h) + env(safe-area-inset-bottom) + 14px);
+}
+.tabbody::-webkit-scrollbar {
+  display: none;
+}
+.tabbody > * {
+  flex: 0 0 auto;
+}
+
+/* 常用语那排在窄屏会被裁掉半个字，右端淡出一下，看起来像「还能往右滑」 */
+.quick-scroll {
+  -webkit-mask-image: linear-gradient(to right, #000 82%, transparent 100%);
+  mask-image: linear-gradient(to right, #000 82%, transparent 100%);
+  padding-right: 10px;
+}
+
+/* 聊天空态：一句话 + 三个常用问句 */
+.chat-empty {
+  margin: 8px 0 0;
+  padding: 16px;
+  border-radius: 16px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+}
+.chat-empty .ce-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+.chat-empty .ce-sub {
+  margin: 4px 0 10px;
+  font-size: 12.5px;
+  color: var(--dim);
+}
+.chat-empty .ce-ask {
+  display: block;
+  width: 100%;
+  text-align: left;
+  margin-top: 8px;
+  padding: 9px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 13.5px;
+}
+
+/* AI 页的聊天区要自己贴底，所以换成 flex 列 + 内部滚动 */
+.tabbody.chat-body {
+  /* dock 是正常流里的兄弟节点，不是浮层，所以底部只留一点点余量 */
+  padding: 14px 16px calc(env(safe-area-inset-bottom) + 14px);
+  gap: 0;
+  overflow-y: auto;
+}
+
+/* 上游把 dock 里的输入框设成「透明+无描边」，新版里只剩一行字、看不出是输入框；
+   这里补一个淡底 + 细描边，让「能打字的地方」看得见 */
+.dock .composer input {
+  background: rgba(255, 255, 255, 0.05) !important;
+  border: 1px solid var(--hairline) !important;
+  border-bottom: 1px solid var(--hairline) !important;
+  border-radius: 12px !important;
+  color: var(--text) !important;
+  padding: 10px 12px !important;
+  font-size: 14.5px;
+}
+.dock .composer input::placeholder {
+  color: var(--placeholder);
+}
+.dock .composer input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+/* 顶栏：主页 / AI / 学期课表 / 我的各自一份 */
+header.top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  padding: calc(env(safe-area-inset-top) + 10px) 16px 8px;
+  border-bottom: 1px solid var(--line);
+  /* 主题块把 header 底色改成了透明，这里压回去，否则聊天气泡会从标题底下透出来 */
+  background: var(--bg) !important;
+  position: sticky;
+  top: 0;
+  z-index: 20;
+}
+header.top .who {
+  min-width: 0;
+}
+header.top .date {
+  font-size: 12.5px;
+  color: var(--dim);
+}
+header.top h1 {
+  margin: 2px 0 0;
+  font-size: 22px;
+  font-weight: 650;
+  letter-spacing: 0.01em;
+}
+header.top .sub {
+  font-size: 12.5px;
+  color: var(--dim);
+  margin-top: 3px;
+}
+header.top .acts {
+  display: flex;
+  gap: 8px;
+  flex: 0 0 auto;
+  padding-top: 2px;
+}
+.iconbtn {
+  position: relative;
+  width: 38px;
+  height: 38px;
+  display: grid;
+  place-items: center;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--text);
+  cursor: pointer;
+  padding: 0;
+}
+.iconbtn svg {
+  width: 19px;
+  height: 19px;
+}
+.iconbtn .dot {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--err);
+  color: #fff;
+  font-size: 10.5px;
+  line-height: 16px;
+  text-align: center;
+  border: 2px solid var(--bg);
+}
+.iconbtn:disabled {
+  opacity: 0.55;
+}
+
+/* 通用卡片 */
+.card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 13px 14px;
+}
+.cardhead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+.cardhead strong {
+  font-size: 15px;
+  font-weight: 600;
+}
+.cardhead span {
+  font-size: 12.5px;
+  color: var(--dim);
+}
+.cardhead .link {
+  color: var(--accent);
+  font-size: 13px;
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+}
+
+/* 主页：今日课表 */
+.lessons {
+  display: flex;
+  flex-direction: column;
+}
+.lesson {
+  display: flex;
+  gap: 11px;
+  padding: 8px 0;
+}
+.lesson + .lesson {
+  border-top: 1px dashed rgba(255, 255, 255, 0.07);
+}
+.lesson .time {
+  flex: 0 0 52px;
+  font: 12.5px/1.45 ui-monospace, Menlo, Consolas, monospace;
+  color: var(--accent);
+  padding-top: 1px;
+}
+.lesson .body {
+  min-width: 0;
+}
+.lesson .name {
+  font-weight: 600;
+  font-size: 14.5px;
+  word-break: break-word;
+}
+.lesson .meta {
+  font-size: 12.5px;
+  color: var(--dim);
+  margin-top: 1px;
+}
+.lesson.now .time {
+  color: var(--ok);
+}
+.lesson.done {
+  opacity: 0.5;
+}
+.empty-line {
+  font-size: 13px;
+  color: var(--dim);
+  padding: 6px 0 2px;
+}
+
+/* 主页：三个入口 */
+.tiles {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+.tile {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 11px 11px 10px;
+  text-align: left;
+  color: var(--text);
+  cursor: pointer;
+  min-width: 0;
+}
+.tile:active {
+  border-color: var(--accent);
+}
+.tile .sq {
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  background: #000;
+}
+.tile .t {
+  margin-top: 8px;
+  font-size: 13.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tile .s {
+  font-size: 12px;
+  color: var(--dim);
+  margin-top: 1px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tile .s.ok {
+  color: var(--ok);
+}
+.tile .s.warn {
+  color: var(--warn);
+}
+
+/* 主页：最新一条通知 */
+.notice-line {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 11px 12px;
+  cursor: pointer;
+  text-align: left;
+  color: var(--text);
+  width: 100%;
+}
+.notice-line .kind {
+  flex: 0 0 auto;
+  font-size: 11px;
+  color: var(--dim);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 1px 6px;
+}
+.notice-line .nt {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 13.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.notice-line .more {
+  flex: 0 0 auto;
+  font-size: 11.5px;
+  color: var(--dim);
+}
+.notice-line.empty .nt {
+  color: var(--dim);
+}
+
+/* 学期课表 */
+.termline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 19px;
+  font-weight: 650;
+  padding: 2px 0 6px;
+}
+.termline .caret {
+  font-size: 11px;
+  color: var(--dim);
+}
+.weekbar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  padding: 2px 0 10px;
+  font-size: 13px;
+  color: var(--dim);
+}
+.weekbar b {
+  font-size: 20px;
+  color: var(--text);
+  font-weight: 650;
+}
+.weekbar button {
+  width: 30px;
+  height: 30px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--text);
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+}
+.weekbar button:disabled {
+  opacity: 0.35;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: var(--timecol, 60px) repeat(7, minmax(0, 1fr));
+  grid-auto-rows: 46px;
+  gap: 2px 3px;
+  background-image: repeating-linear-gradient(
+    to bottom,
+    rgba(255, 255, 255, 0.07) 0 1px,
+    transparent 1px 24px,
+    rgba(255, 255, 255, 0.07) 24px 25px,
+    transparent 25px 48px
+  );
+  background-position: 0 23px;
+  position: relative;
+}
+.grid .dow {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  padding-bottom: 4px;
+  font-size: 12px;
+  color: var(--dim);
+}
+.grid .dow.today {
+  color: var(--accent);
+}
+.grid .dow .d {
+  font-size: 11.5px;
+}
+.grid .slot-time {
+  position: relative;
+  padding: 3px 2px 0;
+  font: 7.8px/1.1 ui-monospace, Menlo, Consolas, monospace;
+  color: var(--dim);
+  white-space: nowrap;
+  text-align: center;
+  letter-spacing: -0.1px;
+}
+.grid .slot-time b {
+  display: block;
+  font-size: 11px;
+  color: var(--text);
+  opacity: 0.75;
+  font-weight: 600;
+  letter-spacing: 0;
+  line-height: 1.15;
+  margin-bottom: 1px;
+}
+.grid .course {
+  border-radius: 7px;
+  padding: 3px 3px 2px;
+  overflow: hidden;
+  font-size: 9px;
+  line-height: 1.22;
+  letter-spacing: -0.2px;
+  color: #f3f5f9;
+  cursor: pointer;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+.grid .course .n {
+  font-weight: 600;
+  word-break: break-word;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.grid .course .r {
+  margin-top: 2px;
+  font-size: 8.5px;
+  opacity: 0.82;
+  word-break: break-word;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.grid .course .tag {
+  display: inline-block;
+  margin-bottom: 2px;
+  font-size: 9px;
+  padding: 0 3px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.22);
+}
+
+/* 底部四栏 */
+.tabbar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 20;
+  height: calc(var(--nav-h) + env(safe-area-inset-bottom));
+  padding-bottom: env(safe-area-inset-bottom);
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  align-items: center;
+  background: color-mix(in srgb, var(--bg) 92%, #000);
+  border-top: 1px solid var(--line);
+  backdrop-filter: blur(10px);
+}
+.tabbar button {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  background: none;
+  border: 0;
+  padding: 4px 0 2px;
+  color: var(--dim);
+  font-size: 11.5px;
+  cursor: pointer;
+}
+.tabbar button .ic {
+  display: grid;
+  place-items: center;
+  width: 25px;
+  height: 25px;
+  border-radius: 7px;
+  opacity: 0.9;
+}
+.tabbar button .ic svg {
+  width: 23px;
+  height: 23px;
+}
+.tabbar button.on {
+  color: var(--accent);
+}
+.tabbar button.on .ic {
+  opacity: 1;
+  background: rgba(76, 141, 255, 0.14);
+}
+
+/* 我的：分组卡片 */
+.sec-title {
+  font-size: 12.5px;
+  color: var(--dim);
+  padding: 6px 2px 0;
+}
+.mine-card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  overflow: hidden;
+}
+.mine-row {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 11px 13px;
+  width: 100%;
+  background: none;
+  border: 0;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+.mine-row + .mine-row {
+  border-top: 1px solid var(--line);
+}
+.mine-row .ic {
+  flex: 0 0 auto;
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  display: grid;
+  place-items: center;
+  background: rgba(76, 141, 255, 0.14);
+  color: #9dc0ff;
+  font-size: 15px;
+}
+.mine-row .tx {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.mine-row .tx .t {
+  display: block;
+  font-size: 14.8px;
+  font-weight: 550;
+}
+.mine-row .tx .s {
+  display: block;
+  font-size: 12px;
+  color: var(--dim);
+  margin-top: 2px;
+}
+.mine-row .tx .s b {
+  color: var(--ok);
+  font-weight: 500;
+}
+.mine-row .val {
+  flex: 0 0 auto;
+  font-size: 12.5px;
+  color: var(--dim);
+}
+.mine-row .chev {
+  flex: 0 0 auto;
+  color: var(--dim);
+  font-size: 16px;
+  line-height: 1;
+}
+.mine-row .sw {
+  flex: 0 0 auto;
+  width: 42px;
+  height: 25px;
+  border-radius: 999px;
+  background: var(--line);
+  position: relative;
+  transition: background 0.15s;
+}
+.mine-row .sw::after {
+  content: '';
+  position: absolute;
+  top: 2.5px;
+  left: 2.5px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #fff;
+  transition: transform 0.15s;
+}
+.mine-row .sw.on {
+  background: var(--accent);
+}
+.mine-row .sw.on::after {
+  transform: translateX(17px);
+}
+
+/* 二级页：整页替换，带侧滑 */
+.subpage {
+  position: absolute;
+  inset: 0;
+  z-index: 15;
+  background: var(--bg);
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  padding: calc(env(safe-area-inset-top) + 10px) 16px calc(env(safe-area-inset-bottom) + 20px);
+  scrollbar-width: none;
+}
+.subpage::-webkit-scrollbar {
+  display: none;
+}
+.subpage .subhead {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-bottom: 12px;
+}
+.subpage .subhead button {
+  background: none;
+  border: 0;
+  color: var(--accent);
+  font-size: 15px;
+  cursor: pointer;
+  padding: 0;
+}
+.subpage .subhead strong {
+  font-size: 17px;
+}
+
+/* 四栏外壳：底部固定栏，dock 要给它让位 */
+.app { position: relative; }
+.dock { margin-bottom: calc(var(--nav-h) + env(safe-area-inset-bottom)); }
+
+/* 二级页里的通用小件：配色选择、测试连接按钮、关于页的键值行 */
+.theme-pick {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+.theme-opt {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 13px;
+  border-radius: 11px;
+  border: 1px solid var(--hairline);
+  background: var(--panel);
+  color: var(--text);
+  font-size: 13.5px;
+  cursor: pointer;
+}
+.theme-opt.on {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.theme-opt i {
+  width: 14px;
+  height: 14px;
+  border-radius: 4px;
+  display: inline-block;
+}
+.theme-opt .sw-cream {
+  background: #f4ebd7;
+}
+.theme-opt .sw-ink {
+  background: #16233a;
+}
+.theme-opt .sw-teal {
+  background: #123c39;
+}
+
+.subpage button.mini {
+  margin-top: 12px;
+  padding: 8px 16px;
+  border-radius: 11px;
+  border: 1px solid var(--accent);
+  background: transparent;
+  color: var(--accent);
+  font-size: 13.5px;
+  cursor: pointer;
+}
+.subpage button.mini:disabled {
+  opacity: 0.55;
+}
+
+.about-row {
+  display: flex;
+  gap: 12px;
+  padding: 9px 0;
+  font-size: 13px;
+  border-top: 1px dashed var(--hairline);
+}
+.about-row .k {
+  flex: 0 0 62px;
+  color: var(--dim);
+}
+.about-row .v {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* 更新提示 / 更新公告：居中小卡片 + 半透明遮罩 */
+.dialog-wrap {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(0, 0, 0, 0.5);
+  animation: dialog-fade 160ms ease-out;
+}
+@keyframes dialog-fade {
+  from {
+    opacity: 0;
+  }
+}
+.dialog {
+  width: 100%;
+  max-width: 330px;
+  padding: 20px 18px 16px;
+  border-radius: 18px;
+  border: 1px solid var(--hairline);
+  background: var(--panel);
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.45);
+}
+.dialog .d-title {
+  font-size: 16px;
+  font-weight: 650;
+}
+.dialog .d-sub {
+  margin: 6px 0 0;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--dim);
+}
+.dialog .d-notes {
+  margin: 10px 0 0;
+  padding: 0 0 0 16px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text);
+}
+.dialog .d-notes li + li {
+  margin-top: 4px;
+}
+.dialog .d-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+  margin-top: 16px;
+}
+.dialog .d-actions button {
+  border-radius: 11px;
+  padding: 9px 16px;
+  font-size: 13.5px;
+  cursor: pointer;
+  border: 1px solid var(--hairline);
+  background: transparent;
+  color: var(--text);
+}
+.dialog .d-actions .primary {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #fff;
+  font-weight: 600;
+}
+.dialog .d-actions .ghost {
+  color: var(--dim);
+}
+

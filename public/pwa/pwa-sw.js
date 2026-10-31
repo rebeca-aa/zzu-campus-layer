@@ -7,9 +7,13 @@ const SHELL = 'campus-layer-shell-v9';
 const SHELL_FILES = ['./index.html'];
 
 self.addEventListener('install', (e) => {
-  e.waitUntil(
-    caches.open(SHELL).then((c) => c.addAll(SHELL_FILES)).catch(() => undefined).then(() => self.skipWaiting()),
-  );
+  /* 这里不再 skipWaiting：新 worker 装好后停在 waiting，
+     等页面弹「新版本已就绪」，用户点更新时才接管。 */
+  e.waitUntil(caches.open(SHELL).then((c) => c.addAll(SHELL_FILES)).catch(() => undefined));
+});
+
+self.addEventListener('message', (e) => {
+  if (e.data && e.data.type === 'SKIP_WAITING') self.skipWaiting();
 });
 
 self.addEventListener('activate', (e) => {
