@@ -1510,7 +1510,7 @@ const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
                 <span class="v">@types/chrome · @types/node · DefinitelyTyped 社区 · MIT（开发期依赖）</span>
               </div>
               <p class="hint">
-                真诚感谢上面这些作者：学校的接口没有文档，是他们一点点摸清楚并开源出来，这个项目才做得动。各项目的许可与版权归各位作者所有。
+                上面这几个是项目里实际在用的开源库，许可与版权归各位作者所有。宿舍电量那套功能（连同当时参考的几个电量项目）已经整块去掉了，这里不再列。
               </p>
             </div>
           </div>

@@ -456,22 +456,10 @@ mobile/android/      安卓壳（Gradle，零第三方依赖）
 
 ## 致谢
 
-这个项目能立起来，靠的是前面这些人把学校的接口摸清楚并开源出来——学校的接口没有文档，没有他们就得一个个试。
-
-**校园数据接口**
-
-| 项目 | 作者 | 许可 | 用在哪 |
-|---|---|---|---|
-| [ZZU.Py](https://github.com/Illustar0/ZZU.Py) | Illustar0 | MIT | 一卡通、教务这些接口的 Python 实现，摸接口时对照着看过 |
-
-> 早先还参照过 [ZZU-Electricity](https://github.com/TorCroft/ZZU-Electricity)、
-> [ZZU-Electricity-Monitor](https://github.com/Elykia093/ZZU-Electricity-Monitor)、
-> [ZZU-Dorm-Electricity-Balance-Base](https://github.com/rimrose/ZZU-Dorm-Electricity-Balance-Base)
-> 做过「宿舍电量」：一卡通那几个接口不带 CORS，手机网页里发不出去，只有壳的原生请求或扩展面板才行。
-> 这个功能后来去掉了，代码里已经没有了，仍谢谢这几位把协议摸清楚并开源出来。
+这个项目能立起来，靠的是一批开源库，以及替大家摸过学校接口的人。「宿舍电量」那套功能（连同当时参考的几个电量项目）已经整块去掉，代码里不再有，这里也就不再单独列名单。
 
 **技术栈**
 
 [Preact](https://preactjs.com)（Jason Miller 与贡献者，MIT）· [Zod](https://zod.dev)（Colin McDonnell，MIT）· [Vite](https://vite.dev)（Evan You 与 Vite 团队，MIT）· [TypeScript](https://www.typescriptlang.org)（Microsoft，Apache-2.0）· [Vitest](https://vitest.dev)（Anthony Fu 等，MIT）· [DefinitelyTyped](https://github.com/DefinitelyTyped/DefinitelyTyped)（社区，MIT）
 
-各项目的许可与版权归各位作者所有。App 里「我的 → 关于 → 开源与致谢」也列了同一份名单。
+各项目的许可与版权归各位作者所有。App 里「我的 → 关于 → 开源与致谢」列的是同一份名单。
