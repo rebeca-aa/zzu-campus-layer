@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { compressWeeks, dateOfWeek, hhmm, hhmmss, parseDate, toHhmmInt, uniq, weekOfDate, weekdayOf } from '../src/core/util';
+import { compressWeeks, currentWeekOf, dateOfWeek, hhmm, hhmmss, parseDate, toHhmmInt, uniq, weekOfDate, weekdayOf } from '../src/core/util';
 
 describe('时间工具', () => {
   it('把 HHmm 整数格式化成 HH:mm', () => {
@@ -54,5 +54,28 @@ describe('杂项', () => {
     expect(compressWeeks([1, 2, 3, 5])).toBe('1-3,5');
     expect(compressWeeks([4, 6, 8])).toBe('4,6,8');
     expect(compressWeeks([])).toBe('');
+  });
+});
+
+describe('现在是第几周', () => {
+  const TERM = { startDate: '2026-09-07' };
+
+  it('服务端给了 currentWeek 就用它', () => {
+    expect(currentWeekOf({ ...TERM, currentWeek: 8 }, '2026-10-31')).toBe(8);
+  });
+
+  it('没给 currentWeek 就按首周周一推（不会一直停在第 1 周）', () => {
+    expect(currentWeekOf(TERM, '2026-10-31')).toBe(weekOfDate(TERM.startDate, '2026-10-31'));
+    expect(currentWeekOf(TERM, '2026-10-31')).toBeGreaterThan(1);
+  });
+
+  it('currentWeek 是 0 / 负数时也照样自己推', () => {
+    expect(currentWeekOf({ ...TERM, currentWeek: 0 }, '2026-10-31')).toBe(weekOfDate(TERM.startDate, '2026-10-31'));
+  });
+
+  it('学期还没开始 / 什么都还没有时退回 1', () => {
+    expect(currentWeekOf(TERM, '2026-08-01')).toBe(1);
+    expect(currentWeekOf(null, '2026-10-31')).toBe(1);
+    expect(currentWeekOf({}, '2026-10-31')).toBe(1);
   });
 });

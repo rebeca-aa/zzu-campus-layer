@@ -8,8 +8,9 @@
  */
 import type { CampusSession } from './services';
 import { tokenMeta } from './jwt';
-import { getKV, encodeBundle, type TokenBundle } from './kv';
+import { getKV, encodeBundle, type BundleTheme, type TokenBundle } from './kv';
 import { setTokenSwap } from './http';
+import { CUSTOM_KEY, normalizeCustom, parseThemeKey } from './theme';
 
 export type TokenSource = 'portal' | 'jwxt';
 
@@ -22,6 +23,9 @@ export interface StoredToken {
 type StoreMap = Partial<Record<TokenSource, StoredToken>>;
 
 const KEY = 'tokens';
+
+/** 主题存在自己的键上（和 `pwa/main.tsx` 用的必须是同一个名字）。 */
+const THEME_KEY = 'theme';
 
 async function readStore(): Promise<StoreMap> {
   return (await getKV().get<StoreMap>(KEY)) ?? {};
@@ -157,10 +161,12 @@ export async function setLlmSettings(patch: Partial<LlmSettingsStored>): Promise
 
 // ---- 跨设备搬运登录态（桌面面板 → 手机 PWA） ----
 
-/** 导出当前登录态为一段可粘贴的码（只含 token 本身，不含任何其他信息）。 */
+/** 导出当前登录态为一段可粘贴的码（含 token、模型 key 与外观，不含任何其他信息）。 */
 export async function exportTokenBundle(): Promise<string> {
   const store = await readStore();
   const llmSettings = await getLlmSettings();
+  const themeName = parseThemeKey(await getKV().get<string>(THEME_KEY));
+  const custom = normalizeCustom(await getKV().get<unknown>(CUSTOM_KEY));
   const bundle: TokenBundle = {
     v: 1,
     ...(store.jwxt ? { jwxt: store.jwxt.token } : {}),
@@ -175,6 +181,8 @@ export async function exportTokenBundle(): Promise<string> {
           },
         }
       : {}),
+    // 自定义那套只有当它就是当前主题时才值得带上，否则带过去也是被忽略的一坨数字
+    theme: { name: themeName, ...(themeName === 'custom' ? { custom } : {}) },
     at: Date.now(),
   };
   if (!bundle.jwxt && !bundle.portal) throw new Error('本机还没有采集到登录态，先在浏览器里打开一次校园页面。');
@@ -200,6 +208,12 @@ export async function importTokenBundle(bundle: TokenBundle): Promise<TokenStatu
       ...(bundle.llm.model ? { model: bundle.llm.model } : {}),
       ...(typeof bundle.llm.enabled === 'boolean' ? { enabled: bundle.llm.enabled } : {}),
     });
+  }
+  // 外观：码里带过来就照它换（页面那边下次 refresh 会读到）
+  const theme: BundleTheme | undefined = bundle.theme;
+  if (theme?.name) {
+    await getKV().set(THEME_KEY, theme.name);
+    if (theme.custom) await getKV().set(CUSTOM_KEY, theme.custom);
   }
   return tokenStatuses(now);
 }

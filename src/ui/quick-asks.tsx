@@ -8,7 +8,7 @@
  * 跟 `llm-fields.tsx` 一样，组件不碰存储：父组件拿到新列表后自己落库，
  * 扩展开关 `chrome.storage`、手机走 `localStorage` 都不用在这里分叉。
  */
-import { useState } from 'preact/hooks';
+import { useRef, useState } from 'preact/hooks';
 import {
   MAX_QUICK_ASKS,
   MAX_QUICK_TEXT,
@@ -24,26 +24,81 @@ interface BarProps {
   onPick: (text: string) => void;
   /** 点末尾的「+」 */
   onEdit: () => void;
+  /** 长按某条药丸：删掉它（不传就不支持长按） */
+  onRemove?: (id: string) => void;
   disabled?: boolean;
   /** 面板已经展开时把「+」换成「收起」，避免点了没反应 */
   editing?: boolean;
 }
 
-export function QuickAskBar({ items, onPick, onEdit, disabled = false, editing = false }: BarProps) {
+/**
+ * 一颗药丸：短按发出去，长按（0.55s）删掉。
+ * 长按期间只要手指移开或松开就取消，免得滑动横条时误删。
+ */
+function QuickPill({
+  item,
+  disabled,
+  onPick,
+  onRemove,
+}: {
+  item: QuickAsk;
+  disabled: boolean;
+  onPick: (text: string) => void;
+  onRemove?: (id: string) => void;
+}) {
+  const timer = useRef<number | null>(null);
+  const fired = useRef(false);
+  const clear = () => {
+    if (timer.current !== null) {
+      window.clearTimeout(timer.current);
+      timer.current = null;
+    }
+  };
+  return (
+    <button
+      type="button"
+      onClick={() => {
+        /* 长按已经处理过了，这次点击别再发一遍 */
+        if (fired.current) {
+          fired.current = false;
+          return;
+        }
+        onPick(item.text);
+      }}
+      onPointerDown={() => {
+        if (disabled || !onRemove) return;
+        fired.current = false;
+        clear();
+        timer.current = window.setTimeout(() => {
+          fired.current = true;
+          onRemove(item.id);
+        }, 550);
+      }}
+      onPointerUp={clear}
+      onPointerLeave={clear}
+      onPointerCancel={clear}
+      disabled={disabled}
+      title={item.text === item.label ? undefined : item.text}
+    >
+      {item.label}
+    </button>
+  );
+}
+
+export function QuickAskBar({
+  items,
+  onPick,
+  onEdit,
+  onRemove,
+  disabled = false,
+  editing = false,
+}: BarProps) {
   return (
     <div class="quick">
       {/* 药丸单独一层横滑，末尾的「+」留在滑动区外面，屏幕窄也一直看得见 */}
       <div class="quick-scroll">
         {items.map((item) => (
-          <button
-            key={item.id}
-            type="button"
-            onClick={() => onPick(item.text)}
-            disabled={disabled}
-            title={item.text === item.label ? undefined : item.text}
-          >
-            {item.label}
-          </button>
+          <QuickPill key={item.id} item={item} disabled={disabled} onPick={onPick} onRemove={onRemove} />
         ))}
       </div>
       <button

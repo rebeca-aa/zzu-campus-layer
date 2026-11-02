@@ -6,7 +6,8 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { ask } from '../src/core/agent';
 import { getKV, parseImportLink } from '../src/core/kv';
 import { probeLlm } from '../src/core/llm';
-import { buildReminderBlocks, pushReminders } from '../src/core/remind';
+import { buildReminderBlocks, nextReminder, pushReminders } from '../src/core/remind';
+import { ageText, readCache, writeCache } from '../src/core/offline';
 import { CampusService } from '../src/core/services';
 import {
   clearTokens,
@@ -20,12 +21,13 @@ import {
   type TokenStatus,
 } from '../src/core/storage';
 import { LlmFields } from '../src/ui/llm-fields';
-import { AppCreds } from '../src/ui/app-creds';
+import { LoginPage } from './login-card';
 import { QuickAskBar, QuickAskEditor } from '../src/ui/quick-asks';
 import { CampusMap, RichText, download } from '../src/ui/rich';
 import {
   defaultQuickAsks,
   loadQuickAsks,
+  removeQuickAsk,
   resetQuickAsks,
   saveQuickAsks,
   type QuickAsk,
@@ -59,8 +61,19 @@ import {
 import { displayDayShanghai, msUntilMidnightShanghai, msUntilRollover, todayShanghai } from '../src/core/util';
 import type { Term } from '../src/core/types';
 import { NoticeBoard } from '../src/ui/notice';
-import { HomeView, MineView, ScheduleView, TabBar, type Caller, type TabKey } from './views';
+import { HomeView, HueLine, LineSlider, MineView, ScheduleView, TabBar, type Caller, type TabKey } from './views';
 import { fetchRelease, isNewer, SEEN_KEY, shouldAnnounce, type Release } from './update';
+import {
+  applyCustomVars,
+  CUSTOM_PRESETS,
+  CUSTOM_KEY,
+  DEFAULT_CUSTOM,
+  derivePalette,
+  normalizeCustom,
+  parseThemeKey,
+  type CustomTheme,
+  type ThemeKey,
+} from '../src/core/theme';
 import './style.css';
 import './tabs.css';
 
@@ -95,18 +108,26 @@ function pushNote(text: string) {
   window.dispatchEvent(new CustomEvent("campus-note", { detail: text }));
 }
 
-/** 三套配色。teal 是后加的「蓝绿」：和 ink 共用深色骨架，只换一组变量。 */
-type ThemeName = 'cream' | 'ink' | 'teal';
+/** 四套配色：前三套写死，第四套「自定义」由 src/core/theme.ts 现算变量。 */
+type ThemeName = ThemeKey;
 
 /** 状态栏/地址栏跟着配色走，免得换完主题上边还留着旧颜色。 */
-const THEME_COLOR: Record<ThemeName, string> = {
+const THEME_COLOR: Record<Exclude<ThemeKey, 'custom'>, string> = {
   cream: '#f4ebd7',
   ink: '#0b1220',
   teal: '#07191a',
 };
 
-function syncThemeMeta(next: ThemeName): void {
-  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', THEME_COLOR[next]);
+const THEME_LABEL: Record<ThemeName, string> = {
+  cream: '米白',
+  ink: '藏青',
+  teal: '蓝绿',
+  custom: '自定义',
+};
+
+function syncThemeMeta(next: ThemeName, custom?: CustomTheme): void {
+  const color = next === 'custom' && custom ? derivePalette(custom).bg : THEME_COLOR[next === 'custom' ? 'ink' : next];
+  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', color);
 }
 
 function App() {
@@ -206,6 +227,10 @@ const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
 
   /* 两类通知分开控制：课前提醒默认开（学生本来就想被提醒），资讯通知默认关（不打扰）。 */
   const [notifyClass, setNotifyClass] = useState(true);
+  /** 下一条课前提醒的时间戳（界面显示「下一条：今天 13:30」） */
+  const [nextRemindAt, setNextRemindAt] = useState<number | null>(null);
+  /** 安卓壳没给「闹钟和提醒」权限：只能排不精确闹钟，会晚到 */
+  const [remindExactWarn, setRemindExactWarn] = useState(false);
   const [renewBusy, setRenewBusy] = useState(false);
   const [renewNote, setRenewNote] = useState<'' | 'ok' | 'fail'>('');
   const [renewStep, setRenewStep] = useState('');
@@ -213,18 +238,56 @@ const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
   /* 扩展里（侧栏）有 host_permissions，跨域请求浏览器会放行；网页版没有 */
   const inExtension =
     typeof (globalThis as unknown as { chrome?: { runtime?: { id?: unknown } } }).chrome?.runtime?.id === 'string';
-  /* 配色：cream=米白 / ink=黑+藏青 / teal=黑+蓝绿（默认 ink） */
+  /* 配色：cream=米白 / ink=黑+藏青 / teal=黑+蓝绿 / custom=自己调（默认 ink） */
   const [theme, setTheme] = useState<ThemeName>('ink');
+  const [themeCustom, setThemeCustom] = useState<CustomTheme>(DEFAULT_CUSTOM);
+  /** 字号：立刻生效 + 记在本机 */
+  const setFontScale = (n: number) => {
+    const v = Math.max(90, Math.min(115, Math.round(n)));
+    setFontScaleState(v);
+    document.documentElement.style.setProperty('--zoom-scale', String(v / 100));
+    void getKV().set('fontScale', v);
+  };
+
+  const paint = (next: ThemeName, custom: CustomTheme) => {
+    document.documentElement.dataset.theme = next;
+    if (next === 'custom') {
+      /* 卡片、入口那几块要按「深色/浅色」挑配色，给 CSS 一个可判断的标记 */
+      document.documentElement.dataset.scheme = derivePalette(custom).dark ? 'dark' : 'light';
+    } else {
+      delete document.documentElement.dataset.scheme;
+    }
+    applyCustomVars(next === 'custom' ? custom : null);
+    syncThemeMeta(next, custom);
+  };
   const applyTheme = async (next: ThemeName) => {
     setTheme(next);
-    document.documentElement.dataset.theme = next;
-    syncThemeMeta(next);
+    paint(next, themeCustom);
     await getKV().set('theme', next);
+  };
+  /* 导入码、换设备之后：把存储里那套配色重新套上（不重拉数据） */
+  const adoptStoredTheme = async () => {
+    const name = parseThemeKey(await getKV().get<string>('theme'));
+    const custom = normalizeCustom(await getKV().get<CustomTheme>(CUSTOM_KEY));
+    setThemeCustom(custom);
+    setTheme(name);
+    paint(name, custom);
+  };
+  /* 调自定义的任一格：立刻生效 + 落盘（切回前三套时保留，下次切回来还在） */
+  const patchCustom = (patch: Partial<CustomTheme>) => {
+    const next = normalizeCustom({ ...themeCustom, ...patch });
+    setThemeCustom(next);
+    if (theme === 'custom') paint('custom', next);
+    void getKV().set(CUSTOM_KEY, next);
   };
   const [notifyNews, setNotifyNews] = useState(false);
   /* 问卷：什么时候问、问的时候带什么参数，全在 src/core/survey.ts 里 */
   const [survey, setSurvey] = useState<SurveyState | null>(null);
   const [surveyAsk, setSurveyAsk] = useState(false);
+  /* 登录页的「其他方式」：默认收着，浏览器里换不了票时自动展开 */
+  const [moreOpen, setMoreOpen] = useState(false);
+  /** 全局字号（90–115），所有配色共用，走 --zoom-scale */
+  const [fontScale, setFontScaleState] = useState(100);
   const [noticeBusy, setNoticeBusy] = useState(false);
   const [noticeError, setNoticeError] = useState('');
   const [noticePrefs, setNoticePrefsState] = useState<NoticePrefs>(DEFAULT_NOTICE_PREFS);
@@ -269,16 +332,26 @@ const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
   async function refresh() {
     setStatuses(await tokenStatuses());
     setLlm(await getLlmSettings());
+    void adoptStoredTheme();
     setNoticePrefsState(await getNoticePrefs());
       const themePref = await getKV().get<string>('theme');
-      const t: ThemeName = themePref === 'cream' || themePref === 'teal' ? themePref : 'ink';
+      const t: ThemeName = parseThemeKey(themePref);
+      const customPref = normalizeCustom(await getKV().get<CustomTheme>(CUSTOM_KEY));
+      setThemeCustom(customPref);
       setTheme(t);
-      document.documentElement.dataset.theme = t;
-      syncThemeMeta(t);
+      paint(t, customPref);
+      const scalePref = await getKV().get<number>('fontScale');
+      if (typeof scalePref === 'number' && scalePref >= 90 && scalePref <= 115) {
+        setFontScaleState(Math.round(scalePref));
+        document.documentElement.style.setProperty('--zoom-scale', String(Math.round(scalePref) / 100));
+      }
       const classPref = await getKV().get<boolean>('notifyClass');
       const newsPref = await getKV().get<boolean>('notifyNews');
       setNotifyClass(classPref !== false);
       setNotifyNews(newsPref === true);
+      /* 上次没发出去的半句话，接回来 */
+      const draft = await getKV().get<string>('draft');
+      if (typeof draft === 'string' && draft) setInput(draft);
       setQuickAsks(await loadQuickAsks());
       // 上次聊的那几条带回来：换页面/重开不该从空白开始
       const items = await loadTranscript<Message>();
@@ -305,16 +378,26 @@ const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
     try {
       let session = await loadSession();
       if (!session.jwxtToken && !session.portalToken) {
-        setNoticeError('还没登录：去「我的 → 账号」登录一次，通知就会出来。');
+        setNoticeError('还没登录：去「我的 → 登录」登录一次，通知就会出来。');
         return;
       }
       const out = await runTool('find_notices', { limit: 50 }, new CampusService(session));
       const payload = out.data as { cards?: NoticeCard[]; digest?: TodayDigest } | undefined;
-      setNoticeCards(payload?.cards ?? []);
+      const cards = payload?.cards ?? [];
+      setNoticeCards(cards);
       setNoticeDigest(payload?.digest ?? null);
+      void writeCache('notices', { cards, digest: payload?.digest ?? null });
     if (payload?.digest) void notifyFresh(payload.digest);
     } catch (e) {
-      setNoticeError(e instanceof Error ? e.message : String(e));
+      /* 断网时把上次的通知拿出来顶上 */
+      const cached = await readCache<{ cards: NoticeCard[]; digest: TodayDigest | null }>('notices');
+      if (cached) {
+        setNoticeCards(cached.data.cards);
+        setNoticeDigest(cached.data.digest ?? null);
+        setNoticeError(`离线：通知是 ${ageText(cached.at)}的`);
+      } else {
+        setNoticeError(e instanceof Error ? e.message : String(e));
+      }
     } finally {
       setNoticeBusy(false);
     }
@@ -409,6 +492,18 @@ const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
   const jwxt = statuses.find((s) => s.source === 'jwxt');
   const portal = statuses.find((s) => s.source === 'portal');
   const ready = Boolean(jwxt?.valid || portal?.valid);
+  /**
+   * 教务票快到期时在「我的」顶部提醒一次。
+   * 只提示教务那张（30 天），门户票只有 8 小时、本来就靠自动续期，提醒它只会吵。
+   */
+  const jwxtDaysLeft =
+    jwxt?.valid && typeof jwxt.remainingMs === 'number' ? Math.floor(jwxt.remainingMs / 86_400_000) : null;
+  const loginWarn =
+    jwxtDaysLeft !== null && jwxtDaysLeft <= 3
+      ? jwxtDaysLeft <= 0
+        ? '登录今天就到期了，点这里续一次'
+        : `登录还有 ${jwxtDaysLeft} 天到期，点这里续一次`
+      : undefined;
   /* 票是 8 小时的；剩不到 2 小时就先续，别等它过期了再补救 */
   const NEAR_EXPIRY_MS = 2 * 3_600_000;
   const shouldRenewNow =
@@ -423,6 +518,30 @@ const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
    * 除了挂载和切开关，还要在「回到前台」和「每 30 分钟」重排一次：
    * 否则 App 一直开着（不重启），排好的窗口不会往后滚，开了 7～14 天之后就断档。
    */
+  /* 网页版没有系统闹钟：页面开着的时候就近排几个浏览器通知（关掉页面就没了） */
+  const browserTimers = useRef<number[]>([]);
+  const armBrowserNotifications = useCallback((blocks: ReturnType<typeof buildReminderBlocks>) => {
+    for (const id of browserTimers.current) window.clearTimeout(id);
+    browserTimers.current = [];
+    const shell = typeof window !== 'undefined' ? window.CampusNotify : undefined;
+    if (shell && typeof shell.setReminders === 'function') return; // 壳里交给系统闹钟
+    if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
+    const now = Date.now();
+    for (const b of blocks) {
+      const delay = b.at - now;
+      if (delay <= 0 || delay > 12 * 3600_000) continue;
+      browserTimers.current.push(
+        window.setTimeout(() => {
+          try {
+            new Notification(b.title, { body: b.body });
+          } catch {
+            /* 通知失败不该影响别的 */
+          }
+        }, delay),
+      );
+    }
+  }, []);
+
   const syncReminders = useCallback(async () => {
     if (!notifyClass) return;
     try {
@@ -454,6 +573,9 @@ const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
     if (!question || busy) return;
     setMessages((m) => trimTranscript([...m, { role: 'user', text: question }]));
     setInput('');
+    /* 发出去就把草稿清掉；顺手收键盘，别让它挡住回答 */
+    void getKV().set('draft', '');
+    (document.activeElement as HTMLElement | null)?.blur?.();
     setBusy(true);
     try {
       let session = await loadSession();
@@ -561,6 +683,7 @@ const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
         const next = await importTokenBundle(needPortal(bundle));
         setStatuses(next);
         setLlm(await getLlmSettings());
+        void adoptStoredTheme();
         stepBack();
         setNote('登录态已导入');
         setTimeout(() => setNote(''), 2500);
@@ -596,6 +719,7 @@ const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
       const next = await importTokenBundle(bundle);
       setStatuses(next);
       setLlm(await getLlmSettings());
+      void adoptStoredTheme();
       setPaste('');
       stepBack();
       setNote(bundle.llm?.apiKey ? '导入成功（含模型 key）' : '导入成功');
@@ -613,6 +737,7 @@ const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
       const next = await importTokenBundle(bundle);
       setStatuses(next);
       setLlm(await getLlmSettings());
+      void adoptStoredTheme();
       setPaste('');
       stepBack();
       setNote(bundle.llm?.apiKey ? '导入成功（含模型 key）' : '导入成功');
@@ -647,6 +772,7 @@ const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
         setStatuses(st);
         const llmNow = await getLlmSettings();
         setLlm(llmNow);
+        void adoptStoredTheme();
         setNote('已从链接导入登录态');
         setTimeout(() => setNote(''), 2500);
       } catch (e) {
@@ -809,7 +935,7 @@ const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
     window.setTimeout(() => setHomeBusy(false), 1200);
   }, []);
 
-  const themeLabel = theme === 'cream' ? '米白' : theme === 'teal' ? '蓝绿' : '藏青';
+  const themeLabel = THEME_LABEL[theme];
 
 
   /* 进来自动静默查一次线上版本：有新版就在「检查更新」那行亮红点（不弹窗） */
@@ -1093,6 +1219,7 @@ const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
       {tab === 'mine' && (
         <div class="page-live" key="mine">
           <MineView
+          loginWarn={loginWarn}
           version={buildVersion}
           themeLabel={themeLabel}
           jwtText={jwxt ? (jwxt.valid ? (jwxt.remainingText ?? '可用') : '已过期') : '未登录'}
@@ -1244,6 +1371,14 @@ const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
           disabled={busy}
           editing={quickEditing}
           onEdit={() => setQuickEditing((v) => !v)}
+          onRemove={(id) => {
+            const hit = quickAsks.find((q) => q.id === id);
+            if (!hit) return;
+            if (!window.confirm(`删掉常用语「${hit.label}」？`)) return;
+            const next = removeQuickAsk(quickAsks, id);
+            setQuickAsks(next);
+            void saveQuickAsks(next);
+          }}
           onPick={(text) => {
             setQuickEditing(false);
             void submit(text);
@@ -1259,7 +1394,12 @@ const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
           >
             <input
               value={input}
-              onInput={(e) => setInput((e.target as HTMLInputElement).value)}
+              onInput={(e) => {
+                const v = (e.target as HTMLInputElement).value;
+                setInput(v);
+                /* 记住没发出去的半句话：切走再回来还在 */
+                void getKV().set('draft', v);
+              }}
               placeholder="问点什么，比如「明天下午有空的教室吗」"
               enterkeyhint="send"
             />
@@ -1284,120 +1424,91 @@ const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
             >
               ‹ 返回
             </button>
-            <strong>账号</strong>
+            <strong>登录</strong>
           </div>
           <div class="tabbody">
-          {inShell ? (
-            <>
-              <p class="hint">
-                <strong>用学校账号登录一次就行</strong>——登录完会自动回到这里，不用复制任何东西。
-              </p>
-              <p class="row">
-                <button class="primary" onClick={() => void shellLogin()}>
-                  用学校账号登录
-                </button>
-                <a
-              class="ghost"
-              href={LIB_LOGIN}
-              target="_blank"
-              rel="noreferrer"
-              onClick={(e) => {
-                const b = (window as unknown as { CampusNotify?: { loginLibrary?: () => void } }).CampusNotify;
-                if (b?.loginLibrary) {
-                  e.preventDefault();
-                  b.loginLibrary();
-                }
+            <LoginPage
+              signedIn={jwxt?.valid ? jwxt.remainingText : ''}
+              onSignedIn={() => void refresh()}
+              onOpenLogin={() => {
+                window.open(CAS_LOGIN, '_blank', 'noreferrer');
+                setMoreOpen(true);
               }}
+            />
+            <p class="hint login-status">
+              教务 {jwxt?.present ? (jwxt.valid ? jwxt.remainingText : '已过期') : '未登录'} · 门户{' '}
+              {portal?.present ? (portal.valid ? portal.remainingText : '已过期') : '未登录'}
+            </p>
+            <details
+              class="more"
+              open={moreOpen}
+              onToggle={(e) => setMoreOpen((e.currentTarget as HTMLDetailsElement).open)}
             >
-            登录图书馆
-          </a>
-          <button class="ghost" onClick={() => void readClip()}>
-                  从剪贴板导入
-                </button>
-              </p>
-              <p class="hint">换手机、清了数据之后才需要重新登录。</p>
-            </>
-          ) : (
-            <>
-              <p class="hint">
-                <strong>办法一（推荐）：用学校账号登录</strong>
-                <br />
-                登录页上<strong>勾一下「记住我」</strong>：教务票能用 30 天，桌面上的扩展还会在过期时自己续一次，不用天天重登。
-              </p>
-              <p class="row">
-                <a class="primary" href={CAS_LOGIN} target="_blank" rel="noreferrer">
-                  打开学校登录页
-                </a>
-                <button class="ghost" onClick={() => void copyLoginUrl()}>
-                  复制登录页链接
-                </button>
-              </p>
-              <p class="row">
-                <a class="ghost" href={CAS_LOGIN_PORTAL} target="_blank" rel="noreferrer">
-                  登录门户（拿门户票）
-                </a>
-              </p>
-              <p class="hint">
-                登录成功后会跳到<strong>一屏代码文本</strong>，这时<strong>长按地址栏 → 复制整条网址 → 回来粘到下面</strong>。
-                <br />跳到 404 或空白页也照样复制地址栏里的网址。
-                <br />如果新打开的页面里<strong>没有地址栏</strong>，先点「复制登录页链接」，粘到自己手机的浏览器里打开。
-              </p>
-              <p class="hint">
-                <strong>办法二：「豫见郑大」App 分享链接</strong>（鸿蒙版可用）：App 里任意页面 → 分享 / 复制链接 → 粘到下面。
-              </p>
-              <p class="hint">
-                装了<strong>安卓壳</strong>的话最省事：在壳里点菜单「登录」，登录完自动灌进来，<strong>不用复制任何东西</strong>。
-              </p>
-            </>
-          )}
-          <textarea
-            rows={4}
-            placeholder="把复制的整条网址粘到这里"
-            value={paste}
-            onInput={(e) => setPaste((e.target as HTMLTextAreaElement).value)}
-          />
-          {note && <p class="hint warn">{note}</p>}
-          <div class="row">
-            <button class="primary" onClick={() => void doImport()} disabled={!paste.trim()}>
-              保存
-            </button>
-            <button class="ghost" onClick={() => void readClip()}>
-              从剪贴板读取
-            </button>
-            <button class="ghost" onClick={() => void doExport()}>
-              导出当前码
-            </button>
-            <button class="ghost" onClick={() => void shareLink()}>
-              复制分享链接
-            </button>
-            <button
-              class="ghost"
-              onClick={async () => {
-                await clearTokens();
-                setStatuses(await tokenStatuses());
-                setNote('已清除');
-              }}
-            >
-              清除
-            </button>
-          </div>
-          <p class="hint" style="opacity:.6">
-            前端 v{buildVersion}
-          </p>
-          <div class="row" style="flex-wrap:wrap;gap:8px">
-            <button type="button" class="ghost" disabled={renewBusy} onClick={() => void doRenew()}>
-              {renewBusy ? '续期中…' : '立即续期（验登录）'}
-            </button>
-            {renewStep && <span class="hint">{renewStep}</span>}
-            {renewNote === 'ok' && <span class="hint ok">续期成功</span>}
-            {renewNote === 'fail' && <span class="hint warn">续期失败（看下面提示）</span>}
-          </div>
-          <p class="hint">
-            当前状态：教务 {jwxt?.present ? (jwxt.valid ? jwxt.remainingText : '已过期') : '未导入'} · 门户{' '}
-            {portal?.present ? (portal.valid ? portal.remainingText : '已过期') : '未导入'}
-            {jwxt?.expText ? `（教务到期 ${jwxt.expText}）` : ''}
-          </p>
-          <AppCreds browserOnly />
+              <summary>其他方式</summary>
+              <div class="more-body">
+                <p class="row">
+                  {inShell ? (
+                    <button class="ghost" onClick={() => void shellLogin()}>
+                      用学校账号登录
+                    </button>
+                  ) : (
+                    <a class="ghost" href={CAS_LOGIN} target="_blank" rel="noreferrer">
+                      打开学校登录页
+                    </a>
+                  )}
+                  <button class="ghost" onClick={() => void copyLoginUrl()}>
+                    复制登录页链接
+                  </button>
+                  <button class="ghost" onClick={() => void readClip()}>
+                    从剪贴板读取
+                  </button>
+                </p>
+                <textarea
+                  rows={3}
+                  placeholder="登录完把地址栏那条网址粘到这里"
+                  value={paste}
+                  onInput={(e) => setPaste((e.target as HTMLTextAreaElement).value)}
+                />
+                <p class="row">
+                  <button class="primary" onClick={() => void doImport()} disabled={!paste.trim()}>
+                    保存
+                  </button>
+                  <button class="ghost" onClick={() => void doExport()} title="复制到剪贴板，里面是明文">
+                    导出码
+                  </button>
+                  <button class="ghost" onClick={() => void shareLink()}>
+                    分享链接
+                  </button>
+                  <button
+                    class="ghost"
+                    onClick={async () => {
+                      /* 清掉就找不回来了，先问一句 */
+                      if (!window.confirm('清掉这台设备上的登录票？清完要重新登录。')) return;
+                      await clearTokens();
+                      setStatuses(await tokenStatuses());
+                      setNote('已清除');
+                    }}
+                  >
+                    清除
+                  </button>
+                </p>
+                {note && <p class="hint warn">{note}</p>}
+                <p class="hint" style="margin-top:2px">
+                  导出码是<strong>明文</strong>，粘完就删，别发群里。
+                </p>
+                <p class="row">
+                  <button type="button" class="ghost" disabled={renewBusy} onClick={() => void doRenew()}>
+                    {renewBusy ? '续期中…' : '续期'}
+                  </button>
+                  {renewStep && <span class="hint">{renewStep}</span>}
+                  {renewNote === 'ok' && <span class="hint ok">续期成功</span>}
+                  {renewNote === 'fail' && <span class="hint warn">续期失败</span>}
+                </p>
+                <p class="hint" style="opacity:.6">
+                  v{buildVersion}
+                </p>
+              </div>
+            </details>
           </div>
         </section>
       )}
@@ -1421,12 +1532,13 @@ const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
                 <strong>配色</strong>
                 <span>现在：{themeLabel}</span>
               </div>
-              <div class="theme-pick">
+              <div class="theme-pick has-custom">
                 {(
                   [
                     ['cream', '米白'],
                     ['ink', '藏青'],
                     ['teal', '蓝绿'],
+                    ['custom', '自定义'],
                   ] as const
                 ).map(([key, label]) => (
                   <button
@@ -1439,6 +1551,123 @@ const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
                   </button>
                 ))}
               </div>
+              {theme === 'custom' ? (
+                <p class="hint">拖那条线就行：从左到右是红到紫。下面这条白到黑管深浅。</p>
+              ) : (
+                <p class="hint">选「自定义」可以自己配色、调深浅和字号。</p>
+              )}
+            </div>
+
+            {theme === 'custom' ? (
+              <>
+                <div class="card">
+                  <div class="cardhead">
+                    <strong>颜色</strong>
+                    <span>拖那条线</span>
+                  </div>
+                  <HueLine
+                    label="背景"
+                    hex={derivePalette(themeCustom).bg}
+                    hue={themeCustom.bgHue}
+                    onChange={(hue) => patchCustom({ bgHue: hue })}
+                    level={themeCustom.bgLevel}
+                    onLevel={(bgLevel) => patchCustom({ bgLevel })}
+                  />
+                  <HueLine
+                    label="文字"
+                    hex={derivePalette(themeCustom).text}
+                    hue={themeCustom.textHue}
+                    onChange={(hue) => patchCustom({ textHue: hue })}
+                  />
+                  <HueLine
+                    label="强调色"
+                    hex={derivePalette(themeCustom).accent}
+                    hue={themeCustom.accentHue}
+                    onChange={(hue) => patchCustom({ accentHue: hue })}
+                  />
+                  <p class="hint">文字的深浅会按对比度自动挑，保证看得清；强调色用在按钮、选中的栏和链接。</p>
+                </div>
+
+                <div class="card">
+                  <div class="cardhead">
+                    <strong>质感</strong>
+                    <span>统一生效</span>
+                  </div>
+                  <LineSlider
+                    label="深浅"
+                    value={themeCustom.shade}
+                    min={0}
+                    max={100}
+                    onChange={(shade) => patchCustom({ shade })}
+                  />
+                  <LineSlider
+                    label="卡片透明"
+                    value={themeCustom.panelAlpha}
+                    min={40}
+                    max={100}
+                    suffix="%"
+                    onChange={(panelAlpha) => patchCustom({ panelAlpha })}
+                  />
+                  <LineSlider
+                    label="圆角"
+                    value={themeCustom.radius}
+                    min={8}
+                    max={24}
+                    onChange={(radius) => patchCustom({ radius })}
+                  />
+                </div>
+
+                <div class="card">
+                  <div class="cardhead">
+                    <strong>预设</strong>
+                    <span>点一下先套上，再微调</span>
+                  </div>
+                  <div class="preset-row">
+                    {CUSTOM_PRESETS.map((p) => (
+                      <button
+                        key={p.id}
+                        class="preset"
+                        onClick={() => {
+                          setThemeCustom(p.theme);
+                          if (theme === 'custom') paint('custom', p.theme);
+                          void getKV().set(CUSTOM_KEY, p.theme);
+                        }}
+                      >
+                        <i style={`background:${derivePalette(p.theme).bg}`} />
+                        <span>{p.name}</span>
+                      </button>
+                    ))}
+                  </div>
+                  <div class="row" style="margin-top:10px">
+                    <button
+                      class="mini"
+                      onClick={() => {
+                        setThemeCustom(DEFAULT_CUSTOM);
+                        if (theme === 'custom') paint('custom', DEFAULT_CUSTOM);
+                        void getKV().set(CUSTOM_KEY, DEFAULT_CUSTOM);
+                      }}
+                    >
+                      恢复默认
+                    </button>
+                  </div>
+                </div>
+              </>
+            ) : null}
+
+            <div class="card">
+              <div class="cardhead">
+                <strong>字号</strong>
+                <span>所有配色都生效</span>
+              </div>
+              <LineSlider
+                label="整体大小"
+                value={fontScale}
+                min={90}
+                max={115}
+                suffix="%"
+                onChange={(n) => setFontScale(n)}
+              />
+              <p class="hint">只影响显示，不改系统字体。看不清就调大一点，最大 115%。</p>
             </div>
           </div>
         </section>
@@ -1658,7 +1887,7 @@ const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
                 <span class="v">@types/chrome · @types/node · DefinitelyTyped 社区 · MIT（开发期依赖）</span>
               </div>
               <p class="hint">
-                上面这几个是项目里实际在用的开源库，许可与版权归各位作者所有。宿舍电量那套功能（连同当时参考的几个电量项目）已经整块去掉了，这里不再列。
+                许可与版权归各位作者所有。
               </p>
             </div>
           </div>

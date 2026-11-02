@@ -112,9 +112,25 @@ export function buildReminderBlocks(
   return out.sort((a, b) => a.at - b.at);
 }
 
+/** 下一节课的提醒（界面用来显示「下一条：今天 13:30」；没有就给 null）。 */
+export function nextReminder(blocks: ReminderBlock[], now = Date.now()): ReminderBlock | null {
+  let best: ReminderBlock | null = null;
+  for (const b of blocks) {
+    if (b.at <= now) continue;
+    if (!best || b.at < best.at) best = b;
+  }
+  return best;
+}
+
 declare global {
   interface Window {
-    CampusNotify?: { setReminders(json: string): void };
+    CampusNotify?: {
+      setReminders(json: string): void;
+      notify?(title: string, body: string): void;
+      askNotify?(): void;
+      exactAllowed?(): boolean;
+      openExactSettings?(): void;
+    };
   }
 }
 

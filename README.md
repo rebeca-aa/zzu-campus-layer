@@ -456,8 +456,6 @@ mobile/android/      安卓壳（Gradle，零第三方依赖）
 
 ## 致谢
 
-这个项目能立起来，靠的是一批开源库，以及替大家摸过学校接口的人。「宿舍电量」那套功能（连同当时参考的几个电量项目）已经整块去掉，代码里不再有，这里也就不再单独列名单。
-
 **技术栈**
 
 [Preact](https://preactjs.com)（Jason Miller 与贡献者，MIT）· [Zod](https://zod.dev)（Colin McDonnell，MIT）· [Vite](https://vite.dev)（Evan You 与 Vite 团队，MIT）· [TypeScript](https://www.typescriptlang.org)（Microsoft，Apache-2.0）· [Vitest](https://vitest.dev)（Anthony Fu 等，MIT）· [DefinitelyTyped](https://github.com/DefinitelyTyped/DefinitelyTyped)（社区，MIT）

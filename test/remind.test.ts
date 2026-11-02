@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { LEAD_MIN, REMIND_DAYS, buildReminderBlocks } from '../src/core/remind';
+import { LEAD_MIN, REMIND_DAYS, buildReminderBlocks, nextReminder } from '../src/core/remind';
 import type { Course } from '../src/core/types';
 
 function course(p: Partial<Course> & { name: string; weekday: number; startTime: string; endTime: string }): Course {
@@ -174,5 +174,27 @@ describe('课前提醒', () => {
     // 14 天里含两个周三（10-21、10-28）
     expect(blocks).toHaveLength(2);
     expect(blocks[1]!.at).toBe(new Date('2026-10-28T07:30:00+08:00').getTime());
+  });
+  it('nextReminder 只挑未来最近的那条', () => {
+    const t0 = NOW.getTime();
+    const blocks = [
+      { at: t0 + 3_600_000, title: 'B', body: '' },
+      { at: t0 - 3_600_000, title: 'A', body: '' },
+      { at: t0 + 600_000, title: 'C', body: '' },
+    ];
+    expect(nextReminder(blocks, t0)?.title).toBe('C');
+    expect(nextReminder(blocks, t0 + 2 * 3_600_000)).toBeNull();
+    expect(nextReminder([], t0)).toBeNull();
+  });
+
+  it('nextReminder 能把「下一条提醒」算成具体时间（界面显示用）', () => {
+    const blocks = buildReminderBlocks(
+      [course({ name: '早课', weekday: WED, startTime: '08:00', endTime: '09:40' })],
+      { now: NOW, days: 1 },
+    );
+    const next = nextReminder(blocks, NOW.getTime());
+    expect(next).not.toBeNull();
+    expect(next!.at).toBe(at('07:30'));
+    expect(next!.title).toContain('早课');
   });
 });

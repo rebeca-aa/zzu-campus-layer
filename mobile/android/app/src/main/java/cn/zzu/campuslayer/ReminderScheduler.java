@@ -1,11 +1,14 @@
 package cn.zzu.campuslayer;
 
+import android.app.Activity;
 import android.app.AlarmManager;
 import android.app.PendingIntent;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.net.Uri;
 import android.os.Build;
+import android.provider.Settings;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -38,6 +41,34 @@ public final class ReminderScheduler {
     public static void restore(Context ctx) {
         String json = prefs(ctx).getString(KEY_JSON, "");
         if (json != null && !json.isEmpty()) scheduleAll(ctx, json);
+    }
+
+    /**
+     * 有没有「闹钟和提醒」权限。
+     *
+     * Android 12 起这条权限默认不给：拿不到就只能排不精确的闹钟，
+     * 省电模式下会被压到几十分钟后甚至丢掉 —— 页面要据此提示用户去开。
+     */
+    public static boolean exactAllowed(Context ctx) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return true;
+        AlarmManager am = (AlarmManager) ctx.getSystemService(Context.ALARM_SERVICE);
+        return am != null && am.canScheduleExactAlarms();
+    }
+
+    /** 打开系统的「闹钟和提醒」授权页。 */
+    public static void openExactSettings(Activity a) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return;
+        try {
+            Intent i = new Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM,
+                    Uri.parse("package:" + a.getPackageName()));
+            a.startActivity(i);
+        } catch (Exception e) {
+            try {
+                a.startActivity(new Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM));
+            } catch (Exception ignored) {
+                /* 个别系统没有这个设置页，忽略 */
+            }
+        }
     }
 
     private static SharedPreferences prefs(Context ctx) {
@@ -120,7 +151,15 @@ public final class ReminderScheduler {
             PendingIntent pi = pendingFor(ctx, reqOf(at, i), at, o);
             try {
                 if (exact) {
-                    am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, pi);
+                    /*
+                     * 有精确闹钟权限时用「闹钟」而不是普通精确闹钟：setAlarmClock 在状态栏显示闹钟图标，
+                     * 省电模式/Doze 下也照响，是唯一能让「课前 30 分钟」准点的写法。
+                     */
+                    try {
+                        am.setAlarmClock(new AlarmManager.AlarmClockInfo(at, pi), pi);
+                    } catch (SecurityException noExact) {
+                        am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, pi);
+                    }
                 } else {
                     // 没拿到精确闹钟权限就退而求其次：可能晚几分钟，但不会完全不响
                     am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, pi);

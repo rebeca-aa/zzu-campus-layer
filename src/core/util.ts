@@ -50,6 +50,22 @@ export function weekOfDate(termStart: string, date: string): number {
   return Math.floor(d / 7) + 1;
 }
 
+/**
+ * 「现在算第几周」：服务端给了 currentWeek 就用它，否则用学期首周周一推。
+ * 两样都没有（还没登录 / 学期信息没回来）就退回 1。
+ */
+export function currentWeekOf(
+  term: { currentWeek?: number; startDate?: string } | null | undefined,
+  today: string,
+): number {
+  if (term?.currentWeek && term.currentWeek > 0) return term.currentWeek;
+  if (term?.startDate) {
+    const w = weekOfDate(term.startDate, today);
+    if (w > 0) return w;
+  }
+  return 1;
+}
+
 /** 1=周一 … 7=周日 */
 export function weekdayOf(date: string): number {
   const ms = parseDate(date);

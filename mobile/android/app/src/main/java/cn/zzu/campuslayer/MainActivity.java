@@ -190,6 +190,19 @@ public class MainActivity extends Activity {
                 Toast.makeText(MainActivity.this, "课前提醒已排好", Toast.LENGTH_SHORT).show();
             });
         }
+
+        /** 页面 → 壳：有没有「闹钟和提醒」权限（没有就只能排不精确的闹钟，会晚到）。 */
+        @JavascriptInterface
+        public boolean exactAllowed() {
+            return ReminderScheduler.exactAllowed(MainActivity.this);
+        }
+
+        /** 页面 → 壳：打开系统的「闹钟和提醒」授权页。 */
+        @JavascriptInterface
+        public void openExactSettings() {
+            runOnUiThread(() -> ReminderScheduler.openExactSettings(MainActivity.this));
+        }
+
         /** PWA 面板上的「立即续期」按钮：走这里（壳没有可用的右上角菜单）。 */
         @android.webkit.JavascriptInterface
         public void renewLogin() {

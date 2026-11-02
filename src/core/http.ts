@@ -113,11 +113,38 @@ export function unwrap<T>(json: unknown, source: Source = 'jwxt'): T {
   return json as T;
 }
 
+/** 单次请求最多等这么久；超时当作可重试的网络错误 */
+const TIMEOUT_MS = 8_000;
+
+/** 把浏览器那几句英文换成用户能懂的话 */
+function humanNetError(e: unknown, aborted: boolean): string {
+  if (aborted) return '网络有点慢，8 秒没回应，稍后再试一次';
+  const msg = (e as Error)?.message ?? '';
+  if (/offline|Failed to fetch|NetworkError|Load failed|network/i.test(msg)) {
+    return '连不上服务器：检查一下网络（校园网 / VPN），再试一次';
+  }
+  return `网络异常：${msg}`;
+}
+
+/** 只有「网络层」的错误值得偷偷重试一次；鉴权/业务错误不重试 */
+function worthRetry(e: unknown): boolean {
+  return e instanceof ApiError && e.status === 0;
+}
+
 export async function send<T>(url: string, opts: SendOptions): Promise<T> {
   const attempt = (token: string): Promise<T> => sendOnce<T>(url, { ...opts, token });
   try {
     return await attempt(opts.token);
   } catch (e) {
+    /* 弱网下第一次常常是 DNS/握手抽风，隔 300ms 再试一次成功率很高 */
+    if (worthRetry(e)) {
+      await new Promise((r) => setTimeout(r, 300));
+      try {
+        return await attempt(opts.token);
+      } catch (e2) {
+        e = e2;
+      }
+    }
     if (!(e instanceof ApiError) || !e.isAuth || !swap) throw e;
     let alt: string | undefined;
     try {
@@ -150,14 +177,24 @@ async function sendOnce<T>(url: string, opts: SendOptions): Promise<T> {
   if (method === 'POST' && opts.body !== undefined) {
     init.body = json ? JSON.stringify(opts.body) : new URLSearchParams(opts.body as Record<string, string>).toString();
   }
-  if (opts.signal) init.signal = opts.signal;
+
+  /* 弱网时别无限等：8 秒没动静就当超时，交给上层重试或报错 */
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
+  if (opts.signal) {
+    if (opts.signal.aborted) ctrl.abort();
+    else opts.signal.addEventListener('abort', () => ctrl.abort(), { once: true });
+  }
+  init.signal = ctrl.signal;
 
   let res: Response;
   try {
     res = await fetch(url, init);
   } catch (e) {
-    throw new ApiError(`网络错误：${(e as Error).message}`, 0);
+    clearTimeout(timer);
+    throw new ApiError(humanNetError(e, ctrl.signal.aborted), 0);
   }
+  clearTimeout(timer);
   const text = await res.text();
   let parsed: unknown;
   try {

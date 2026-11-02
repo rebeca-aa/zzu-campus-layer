@@ -286,3 +286,47 @@ export async function bookLibrarySeat(args: {
   if (!res.ok) return { ok: false, error: res.error ?? '下单失败' };
   return { ok: true, data: res.data };
 }
+
+const LIB_HOME = 'http://order.lib.zzu.edu.cn/h5/index.html';
+
+/**
+ * 用存下来的学号 + 图书馆密码登一次。
+ *
+ * 图书馆是独立账号体系，跟 30 天那张票无关，所以这里只能“真的去点一次登录页”：
+ * 没有标签页就开一个，等它加载完，让 content script 填表单、点登录、等 token。
+ * 碰到验证码或密码不对会如实报错，不会假装成功。
+ */
+export async function autoLoginLibrary(args: {
+  account: string;
+  password: string;
+}): Promise<LibTabResult<{ token?: string; already?: boolean }>> {
+  let tab = await findLibraryTab();
+  let tabId = tab?.id;
+  if (!tabId) {
+    const created = await chrome.tabs.create({ url: LIB_HOME, active: false });
+    if (!created.id) return { ok: false, error: '开不了图书馆页面' };
+    tabId = created.id;
+    await waitTabLoaded(tabId, 12_000);
+  }
+  const res = await send<{ token?: string; already?: boolean }>(tabId, 'lib:autologin', args);
+  if (!res.ok) return { ok: false, error: res.error ?? '登录失败' };
+  return { ok: true, data: res.data ?? {} };
+}
+
+/** 等标签页加载完（拿不到 onUpdated 时退化成 sleep） */
+function waitTabLoaded(tabId: number, timeoutMs: number): Promise<void> {
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      chrome.tabs.onUpdated.removeListener(onUpdated);
+      resolve();
+    };
+    const onUpdated = (id: number, info: chrome.tabs.TabChangeInfo) => {
+      if (id === tabId && info.status === 'complete') finish();
+    };
+    chrome.tabs.onUpdated.addListener(onUpdated);
+    setTimeout(finish, timeoutMs);
+  });
+}

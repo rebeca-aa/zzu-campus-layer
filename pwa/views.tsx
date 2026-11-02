@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import type { Course, Term } from '../src/core/types';
+import { compressWeeks, currentWeekOf } from '../src/core/util';
+import { ageText, readCache, writeCache } from '../src/core/offline';
 
 export type TabKey = 'home' | 'ai' | 'schedule' | 'mine';
 
@@ -140,6 +142,8 @@ export function HomeView(props: {
   const [notice, setNotice] = useState<{ title: string; kind: string } | null>(cached?.notice ?? null);
   const [err, setErr] = useState('');
   const [needLogin, setNeedLogin] = useState(false);
+  /* 点开哪一节课看详情 */
+  const [openLesson, setOpenLesson] = useState<string | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -220,8 +224,27 @@ export function HomeView(props: {
   const list = courses ?? [];
   /* 翻到明天时，「下一节」就是明天第一节，不能拿今天的时钟去比 */
   const next = rolled ? list[0] : list.find((c) => minutesOf(c.endTime) > nowMin);
+  /* 下一节还有多久：今天才说「还有 N 分钟」，明天只说时间 */
+  const nextStart = next ? minutesOf(next.startTime) : 0;
+  const nextLive = Boolean(next) && !rolled && nextStart <= nowMin;
+  const nextIn = rolled || !next
+    ? ''
+    : nextLive
+      ? '正在上'
+      : (() => {
+          const m = nextStart - nowMin;
+          if (m <= 0) return '';
+          if (m < 60) return `还有 ${m} 分钟`;
+          const h = Math.floor(m / 60);
+          const r = m % 60;
+          return r ? `还有 ${h} 小时 ${r} 分` : `还有 ${h} 小时`;
+        })();
   /* 每门课一个固定颜色，跟「学期课表」那边同一套分配逻辑，但用更好区分的亮色 */
   const lessonColors = useMemo(() => assignColors(list, LESSON_COLORS), [list]);
+
+  const copyText = (text: string) => {
+    void navigator.clipboard?.writeText(text).catch(() => undefined);
+  };
 
   return (
     <>
@@ -254,7 +277,7 @@ export function HomeView(props: {
           <div class="cardhead">
             <strong>{rolled ? '明日课表' : '今日课表'}</strong>
             <span>
-              {needLogin
+              {needLogin && list.length === 0
                 ? ''
                 : courses === null
                   ? '读取中…'
@@ -263,11 +286,18 @@ export function HomeView(props: {
                     : '没有课'}
             </span>
           </div>
-          {needLogin ? (
-            <p class="empty-line">还没登录：去「我的 → 账号」登录一次，这里会显示{rolled ? '明天' : '今天'}的课。</p>
+          {needLogin && list.length === 0 ? (
+            <p class="empty-line">还没登录：去「我的 → 登录」登录一次，这里会显示{rolled ? '明天' : '今天'}的课。</p>
           ) : (
             <>
-              {err && <p class="empty-line">{err}</p>}
+              {err && (
+                <p class="empty-line">
+                  {err}
+                  <button class="link" onClick={props.onRefresh}>
+                    重试
+                  </button>
+                </p>
+              )}
               {!err && courses === null && <p class="empty-line">正在读课表…</p>}
               {!err && courses !== null && list.length === 0 && <p class="empty-line">{rolled ? '明天没有课，安心休息。' : '今天没有课，好好休息。'}</p>}
             </>
@@ -276,11 +306,14 @@ export function HomeView(props: {
             {list.map((c) => {
               const done = !rolled && minutesOf(c.endTime) <= nowMin;
               const live = !rolled && !done && minutesOf(c.startTime) <= nowMin;
+              const open = openLesson === c.key;
               return (
-                <div
-                  class={`lesson${done ? ' done' : ''}${live ? ' now' : ''}`}
+                <button
+                  class={`lesson${done ? ' done' : ''}${live ? ' now' : ''}${open ? ' open' : ''}`}
                   key={c.key}
                   style={`--c:${lessonColors[c.name] ?? '#6a2f6d'}`}
+                  aria-expanded={open}
+                  onClick={() => setOpenLesson(open ? null : (c.key ?? null))}
                 >
                   <div class="time">
                     {c.startTime}
@@ -292,17 +325,40 @@ export function HomeView(props: {
                     <div class="meta">
                       {[c.location, c.teachers?.join('、')].filter(Boolean).join(' · ') || '地点待定'}
                     </div>
+                    {open && (
+                      <div class="lesson-more">
+                        <div>
+                          第{' '}
+                          {c.sectionStart && c.sectionStart !== c.sectionEnd
+                            ? `${c.sectionStart}-${c.sectionEnd}`
+                            : (c.sectionStart ?? '?')}{' '}
+                          节
+                        </div>
+                        {c.weeks?.length ? <div>周次：{compressWeeks(c.weeks)}</div> : <div>周次：每周</div>}
+                        {c.location && (
+                          <button
+                            class="link"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              copyText(c.location!);
+                            }}
+                          >
+                            复制地点
+                          </button>
+                        )}
+                      </div>
+                    )}
                   </div>
-                </div>
+                </button>
               );
             })}
           </div>
           <div class="cardhead" style="margin:8px 0 0">
             <span>
-              {needLogin
+              {needLogin && list.length === 0
                 ? ''
                 : next
-                  ? `${rolled ? '明天' : '下一节'} ${next.startTime} ${shortName(next.name)}`
+                  ? `${rolled ? '明天' : '下一节'} ${next.startTime} ${shortName(next.name)}${nextIn ? ` · ${nextIn}` : ''}`
                   : rolled
                     ? '明天没课'
                     : '今天的课都上完了'}
@@ -498,7 +554,12 @@ export function ScheduleView(props: {
   refreshKey: number;
 }) {
   const { call, term, today } = props;
-  const [week, setWeek] = useState<number>(() => term?.currentWeek ?? 1);
+  /**
+   * 本周是第几周：优先用服务端给的 currentWeek；拿不到（接口没回这一项、
+   * 或者周次算失败）就用「学期首周周一 + 今天」自己推——否则一进来永远停在第 1 周。
+   */
+  const currentWeek = useMemo(() => currentWeekOf(term, today), [term, today]);
+  const [week, setWeek] = useState<number>(currentWeek);
   const [courses, setCourses] = useState<Course[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState('');
@@ -517,36 +578,58 @@ export function ScheduleView(props: {
     flipTimer.current = window.setTimeout(() => setFlip(''), 280);
   };
 
+  /* 学期信息晚到 / 换了一天：跟着本周走（不覆盖用户手动翻的周，只对齐"本周变了"） */
+  const lastCurrent = useRef(currentWeek);
   useEffect(() => {
-    if (term?.currentWeek) setWeek(term.currentWeek);
-  }, [term?.currentWeek]);
+    if (lastCurrent.current === currentWeek) return;
+    lastCurrent.current = currentWeek;
+    setWeek(currentWeek);
+  }, [currentWeek]);
+
+  const [at, setAt] = useState<number | null>(null);
+  const [tick, setTick] = useState(0);
 
   useEffect(() => {
     let alive = true;
     setLoading(true);
     setErr('');
+    /* 先把上次的课表铺上：断网/接口慢时也不至于空白 */
+    void (async () => {
+      const cached = await readCache<Course[]>('schedule');
+      if (alive && cached) setCourses(cached.data);
+    })();
     void (async () => {
       const res = await call('get_schedule', { week });
       if (!alive) return;
       if (res.ok) {
         const payload = (res.data as any)?.data ?? res.data;
-        setCourses(Array.isArray(payload?.courses) ? payload.courses : []);
+        const list = Array.isArray(payload?.courses) ? payload.courses : [];
+        setCourses(list);
+        setAt(Date.now());
+        void writeCache('schedule', list);
       } else {
-        setCourses([]);
-        setErr(res.error ?? '课表没读出来');
+        /* 失败时别把缓存清掉，改成提示"这是上次的" */
+        const cached = await readCache<Course[]>('schedule');
+        if (cached) {
+          setCourses(cached.data);
+          setErr(`离线：课表是 ${ageText(cached.at)}的`);
+        } else {
+          setCourses([]);
+          setErr(res.error ?? '课表没读出来');
+        }
       }
       setLoading(false);
     })();
     return () => {
       alive = false;
     };
-  }, [week, props.refreshKey]);
+  }, [week, props.refreshKey, tick]);
 
   const weeks = term?.weeks?.length ? term.weeks : Array.from({ length: 19 }, (_, i) => i + 1);
   const maxWeek = Math.max(...weeks, 1);
   const minWeek = Math.min(...weeks, 1);
 
-  const monday = mondayOf(today, week - (term?.currentWeek ?? week));
+  const monday = mondayOf(today, week - currentWeek);
   const dayDates = Array.from({ length: 7 }, (_, i) => addDays(monday, i));
   const todayIdx = dayDates.indexOf(today);
 
@@ -655,6 +738,14 @@ export function ScheduleView(props: {
         </div>
         {loading && <p class="empty-line">读课表中…</p>}
         {!loading && !err && courses.length === 0 && <p class="empty-line">这周没有课。</p>}
+        {at !== null && (
+          <p class="hint fresh">
+            更新于 {ageText(at)}
+            <button class="link" onClick={() => setTick((n) => n + 1)}>
+              刷新
+            </button>
+          </p>
+        )}
       </main>
     </>
   );
@@ -664,6 +755,12 @@ export function ScheduleView(props: {
 
 
 /* ---------------- 我的 ---------------- */
+
+function remindSub(on: boolean, next?: string, exactWarn?: boolean): string {
+  if (!on) return '每节课开课前 30 分钟各弹一条';
+  const base = next ? `下一条：${next}` : '每节课开课前 30 分钟各弹一条';
+  return exactWarn ? `${base} · 精确闹钟没开，可能晚到` : base;
+}
 
 export function MineView(props: {
   version: string;
@@ -689,6 +786,13 @@ export function MineView(props: {
   onSurvey: () => void;
   /** 「反馈与问卷」那行右边的小字 */
   surveyStatus: string;
+  /** 登录快到期时的一句提醒（为空就不显示） */
+  loginWarn?: string;
+  /** 下一条课前提醒（形如「今天 13:30 高等数学」） */
+  remindNext?: string;
+  /** 安卓壳没拿到「闹钟和提醒」权限 */
+  remindExactWarn?: boolean;
+  onTestNotify?: () => void;
 }) {
   return (
     <>
@@ -698,11 +802,18 @@ export function MineView(props: {
         </div>
       </header>
       <main class="tabbody">
+        {props.loginWarn && (
+          <button class="mine-warn" onClick={props.onLogin}>
+            <span>{props.loginWarn}</span>
+            <span class="chev">›</span>
+          </button>
+        )}
+
         <div class="mine-card">
           <button class="mine-row" onClick={props.onLogin}>
             <span class="ic">☺</span>
             <span class="tx">
-              <span class="t">账号</span>
+              <span class="t">登录</span>
               <span class="s">
                 教务 {props.jwtText} · 门户 {props.portalText}
               </span>
@@ -831,6 +942,120 @@ function addDays(date: string, n: number): string {
 function pad(n: number): string {
   return String(n).padStart(2, '0');
 }
+
+/** 拖一条线：按下、拖、松开都在这一条上，按宽度折算成 0–1。 */
+function useTrack(onRatio: (r: number) => void) {
+  const ref = useRef<HTMLDivElement | null>(null);
+  const dragging = useRef(false);
+  const apply = (clientX: number) => {
+    const el = ref.current;
+    if (!el) return;
+    const box = el.getBoundingClientRect();
+    if (box.width <= 0) return;
+    onRatio(Math.min(1, Math.max(0, (clientX - box.left) / box.width)));
+  };
+  return {
+    ref,
+    onPointerDown: (e: PointerEvent) => {
+      dragging.current = true;
+      (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
+      apply(e.clientX);
+    },
+    onPointerMove: (e: PointerEvent) => {
+      if (dragging.current) apply(e.clientX);
+    },
+    onPointerUp: (e: PointerEvent) => {
+      dragging.current = false;
+      (e.currentTarget as HTMLElement).releasePointerCapture?.(e.pointerId);
+    },
+    onPointerCancel: () => {
+      dragging.current = false;
+    },
+  };
+}
+
+/**
+ * 一条线选色：左边红、右边紫。
+ * 传了 level 就再多一条「白 → 黑」的明度线（目前只有背景用）。
+ */
+export function HueLine(props: {
+  label: string;
+  hex: string;
+  hue: number;
+  onChange: (hue: number) => void;
+  level?: number;
+  onLevel?: (level: number) => void;
+}) {
+  const hueTrack = useTrack((r) => props.onChange(Math.round(r * 360)));
+  const levelTrack = useTrack((r) => props.onLevel?.(Math.round(r * 100)));
+  return (
+    <div class="pick">
+      <div class="pick-head">
+        <span class="pick-label">{props.label}</span>
+        <code class="pick-hex">{props.hex.toUpperCase()}</code>
+      </div>
+      <div
+        class="hue"
+        ref={hueTrack.ref}
+        onPointerDown={hueTrack.onPointerDown}
+        onPointerMove={hueTrack.onPointerMove}
+        onPointerUp={hueTrack.onPointerUp}
+        onPointerCancel={hueTrack.onPointerCancel}
+      >
+        <span
+          class="thumb"
+          style={`left:${clampPct((props.hue / 360) * 100)}%;background:${props.level === undefined ? props.hex : props.hex}`}
+        />
+      </div>
+      {props.level !== undefined && props.onLevel ? (
+        <div
+          class="depth"
+          ref={levelTrack.ref}
+          onPointerDown={levelTrack.onPointerDown}
+          onPointerMove={levelTrack.onPointerMove}
+          onPointerUp={levelTrack.onPointerUp}
+          onPointerCancel={levelTrack.onPointerCancel}
+        >
+          <span class="thumb sm" style={`left:${clampPct(props.level)}%;background:${props.hex}`} />
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function clampPct(n: number): number {
+  return Math.min(100, Math.max(0, n));
+}
+
+/** 一条滑杆，右侧带数值。 */
+export function LineSlider(props: {
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+  step?: number;
+  suffix?: string;
+  onChange: (v: number) => void;
+}) {
+  return (
+    <label class="line-slider">
+      <span class="pick-label">{props.label}</span>
+      <input
+        type="range"
+        min={props.min}
+        max={props.max}
+        step={props.step ?? 1}
+        value={props.value}
+        onInput={(e) => props.onChange(Number((e.currentTarget as HTMLInputElement).value))}
+      />
+      <span class="pick-num">
+        {props.value}
+        {props.suffix ?? ''}
+      </span>
+    </label>
+  );
+}
+
 
 function BellIcon() {
   return (

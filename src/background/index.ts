@@ -29,7 +29,7 @@ import {
 } from '../core/storage';
 import { mintApiKey, probeLlm, resolveProvider } from '../core/llm';
 import { ensureFresh, ensureRenewed, hasUsableToken } from '../core/renew';
-import { bookLibrarySeat, findLibraryTab } from '../core/libtab';
+import { autoLoginLibrary, bookLibrarySeat, findLibraryTab } from '../core/libtab';
 import { describeBook, type BookOutcome } from '../core/libBook';
 import { TOOLS, getNoticeBody, runTool } from '../core/tools';
 
@@ -46,6 +46,7 @@ type Incoming =
   | { type: 'bundle:export' }
   | { type: 'lib:book'; args: { areaId: string; date: string; seatNo: string } }
   | { type: 'lib:status' }
+  | { type: 'lib:autologin'; args: { account: string; password: string } }
   | { type: 'notice:detail'; id: string }
   | { type: 'ping' };
 
@@ -190,6 +191,10 @@ async function handle(message: Incoming): Promise<Reply> {
     case 'lib:status': {
       const tab = await findLibraryTab();
       return { ok: true, data: { open: Boolean(tab), url: tab?.url ?? null } };
+    }
+    case 'lib:autologin': {
+      const out = await autoLoginLibrary(message.args);
+      return out.ok ? { ok: true, data: out.data } : { ok: false, error: out.error };
     }
     case 'notice:detail': {
       // 卡片里只有摘要；读全文时按 id 回查一次（CampusService 有缓存）

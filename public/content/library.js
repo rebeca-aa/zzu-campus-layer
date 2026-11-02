@@ -327,6 +327,49 @@
     return { ok: true, ...v };
   }
 
+  /** 给输入框赋值并让 Vue 收到（直接改 value 不派发事件，框架看不见） */
+  function fill(el, value) {
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+    if (setter) setter.call(el, value);
+    else el.value = value;
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+    el.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+
+  /**
+   * 用存下来的学号 + 图书馆密码登录一次。
+   * 找得到表单就填、找得到「登录」就点，最后看 sessionStorage.token 有没有出来——
+   * 有验证码 / 弹窗 / 别的风控时这里会如实失败，交给用户自己点。
+   */
+  async function autoLogin(args) {
+    const account = String(args.account || '').trim();
+    const password = String(args.password || '');
+    if (!account || !password) return { ok: false, error: '没填学号或密码' };
+    if (token()) return { ok: true, token: token(), already: true };
+
+    const inputs = Array.from(document.querySelectorAll('input'));
+    const pwdEl = inputs.find((i) => i.type === 'password');
+    if (!pwdEl) return { ok: false, error: '没找到登录框（可能已经不在登录页）' };
+    const accEl =
+      inputs.find((i) => i !== pwdEl && /(账号|学号|用户|手机)/.test(i.placeholder || '')) ||
+      inputs.find((i) => i !== pwdEl && (i.type === 'text' || i.type === 'tel' || !i.type));
+    if (!accEl) return { ok: false, error: '没找到账号框' };
+
+    fill(accEl, account);
+    fill(pwdEl, password);
+    await sleep(120);
+
+    const btn =
+      byText(/^(登录|登 录|立即登录|登陆)$/)[0] ||
+      Array.from(document.querySelectorAll('button')).find((b) => /登录|登陆/.test(b.textContent || ''));
+    if (!btn) return { ok: false, error: '没找到「登录」按钮' };
+    btn.click();
+
+    const tok = await waitFor(() => token(), 12_000, 300);
+    if (!tok) return { ok: false, error: '提交了，但没拿到登录态（可能有验证码或密码不对）' };
+    return { ok: true, token: tok };
+  }
+
   chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     if (!msg || typeof msg.type !== 'string' || !msg.type.startsWith('lib:')) return undefined;
     (async () => {
@@ -336,6 +379,7 @@
           navigate(String(msg.args?.areaId || ''), String(msg.args?.date || ''));
           sendResponse({ ok: true });
         } else if (msg.type === 'lib:book') sendResponse(await book(msg.args || {}));
+        else if (msg.type === 'lib:autologin') sendResponse(await autoLogin(msg.args || {}));
         else sendResponse({ ok: false, error: `未知指令 ${msg.type}` });
       } catch (e) {
         sendResponse({ ok: false, error: e instanceof Error ? e.message : String(e) });

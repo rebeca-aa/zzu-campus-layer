@@ -4,6 +4,8 @@
  * 之所以单独抽出来：`src/core/*` 要同时跑在扩展和手机网页里，不能直接吃 `chrome.*`。
  */
 
+import { THEME_KEYS, normalizeCustom, parseThemeKey, type CustomTheme, type ThemeKey } from './theme';
+
 export interface KV {
   get<T>(key: string): Promise<T | undefined>;
   set(key: string, value: unknown): Promise<void>;
@@ -66,7 +68,15 @@ export interface TokenBundle {
   portal?: string;
   /** 模型的 key 与预设：桌面端填过一次，手机端就不用再填。 */
   llm?: BundleLlm;
+  /** 外观：桌面端调好的配色，换设备后不用重调一遍。 */
+  theme?: BundleTheme;
   at: number;
+}
+
+/** 外观随码走：只带「哪套主题 + 自定义那几个数」。 */
+export interface BundleTheme {
+  name: ThemeKey;
+  custom?: CustomTheme;
 }
 
 export function encodeBundle(bundle: TokenBundle): string {
@@ -101,11 +111,28 @@ export function decodeBundle(code: string): TokenBundle {
     }
   }
   if (!jwxt && !portal) throw new Error('这段验证码里没有可用的登录态');
+  const rawTheme = (parsed as { theme?: unknown }).theme;
+  let theme: BundleTheme | undefined;
+  if (rawTheme && typeof rawTheme === 'object') {
+    const o = rawTheme as Record<string, unknown>;
+    /* 认不出的主题名就丢掉：不能悄悄把对方的主题拽回默认，那比不带更糟 */
+    const name =
+      typeof o.name === 'string' && (THEME_KEYS as readonly string[]).includes(o.name)
+        ? (o.name as ThemeKey)
+        : undefined;
+    if (name) {
+      theme = {
+        name,
+        ...(o.custom && typeof o.custom === 'object' ? { custom: normalizeCustom(o.custom) } : {}),
+      };
+    }
+  }
   return {
     v: 1,
     ...(jwxt ? { jwxt } : {}),
     ...(portal ? { portal } : {}),
     ...(llm ? { llm } : {}),
+    ...(theme ? { theme } : {}),
     at: Date.now(),
   };
 }
