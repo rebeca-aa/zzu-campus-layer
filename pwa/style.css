@@ -1690,3 +1690,12 @@ html[data-theme='teal'] .bubble em,
 html[data-theme='teal'] .bubble .dim {
   color: #7fc7c0 !important;
 }
+
+/* ===== 蓝绿主题：回答里的加粗小标题改成天蓝色，别再被米白那条深蓝规则压住 ===== */
+/* 米白用 html:not([data-theme='ink']) 把 .bubble strong 压成 #0f1f3d（深蓝），
+   teal 也命中这条：深底 + 深蓝字，像「今天有 3 条新通知」这种小标题几乎看不见。
+   这里只在 teal 下覆盖成天蓝色，对比度约 9:1。 */
+html[data-theme='teal'] .bubble .md strong,
+html[data-theme='teal'] .bubble strong {
+  color: #7fd4ff !important;
+}
