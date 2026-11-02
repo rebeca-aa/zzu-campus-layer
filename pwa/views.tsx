@@ -128,7 +128,8 @@ export function HomeView(props: {
   unread: number;
   onRefresh: () => void;
   busy: boolean;
-  /** 宿舍电量：卡片上那句话 + 配色档位 */
+  /** 该问问卷时给一份文案和三个动作；不给就不显示 */
+  survey?: { onFill: () => void; onLater: () => void; onNever: () => void } | null;
 }) {
   const { today, call, refreshKey, realToday, rolled } = props;
   /* 上次打开时的结果：先铺出来，网络回来再覆盖，省得白屏等 */
@@ -355,6 +356,27 @@ export function HomeView(props: {
           <span class="nt">{notice ? notice.title : '暂无新通知'}</span>
           <span class="more">›</span>
         </button>
+
+        {props.survey && (
+          <section class="survey-ask">
+            <div class="sa-head">
+              <strong>30 秒问卷</strong>
+              <span>想知道你最常用哪块、哪里最别扭</span>
+            </div>
+            <p class="sa-note">匿名，只带版本号、配色这类信息；不收登录票、学号、聊天记录。</p>
+            <div class="sa-acts">
+              <button class="primary" onClick={props.survey.onFill}>
+                去填
+              </button>
+              <button class="ghost" onClick={props.survey.onLater}>
+                稍后
+              </button>
+              <button class="ghost" onClick={props.survey.onNever}>
+                不再问
+              </button>
+            </div>
+          </section>
+        )}
       </main>
     </>
   );
@@ -664,6 +686,9 @@ export function MineView(props: {
   /** 线上有更新的版本时填它的版本号，用来在「检查更新」那行亮红点 */
   updateVersion?: string;
   renewBusy: boolean;
+  onSurvey: () => void;
+  /** 「反馈与问卷」那行右边的小字 */
+  surveyStatus: string;
 }) {
   return (
     <>
@@ -742,6 +767,14 @@ export function MineView(props: {
         </div>
 
         <div class="mine-card">
+          <button class="mine-row" onClick={props.onSurvey}>
+            <span class="ic">✎</span>
+            <span class="tx">
+              <span class="t">反馈与问卷</span>
+              <span class="s">{props.surveyStatus}</span>
+            </span>
+            <span class="chev">›</span>
+          </button>
           <button class="mine-row" onClick={props.onCheckUpdate} disabled={props.checking}>
             <span class="ic">⤓</span>
             <span class="tx">

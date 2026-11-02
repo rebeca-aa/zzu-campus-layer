@@ -44,6 +44,18 @@ import {
   type NoticePrefs,
 } from '../src/core/noticeStore';
 import { getNoticeBody, runTool } from '../src/core/tools';
+import {
+  loadSurvey,
+  markAsked,
+  markOptOut,
+  markSubmitted,
+  recordLaunch,
+  saveSurvey,
+  shouldAsk,
+  surveyStatusText,
+  surveyUrl,
+  type SurveyState,
+} from '../src/core/survey';
 import { displayDayShanghai, msUntilMidnightShanghai, msUntilRollover, todayShanghai } from '../src/core/util';
 import type { Term } from '../src/core/types';
 import { NoticeBoard } from '../src/ui/notice';
@@ -104,7 +116,7 @@ function App() {
   /* 底部四栏：主页 / AI / 学期课表 / 我的 */
   const [tab, setTab] = useState<TabKey>('home');
   /* 我的下面的二级页 */
-  const [sub, setSub] = useState<'none' | 'theme' | 'settings' | 'about'>('none');
+  const [sub, setSub] = useState<'none' | 'theme' | 'settings' | 'about' | 'survey'>('none');
   const [term, setTerm] = useState<Term | null>(null);
   const [homeRefresh, setHomeRefresh] = useState(0);
   const [homeBusy, setHomeBusy] = useState(false);
@@ -210,6 +222,9 @@ const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
     await getKV().set('theme', next);
   };
   const [notifyNews, setNotifyNews] = useState(false);
+  /* 问卷：什么时候问、问的时候带什么参数，全在 src/core/survey.ts 里 */
+  const [survey, setSurvey] = useState<SurveyState | null>(null);
+  const [surveyAsk, setSurveyAsk] = useState(false);
   const [noticeBusy, setNoticeBusy] = useState(false);
   const [noticeError, setNoticeError] = useState('');
   const [noticePrefs, setNoticePrefsState] = useState<NoticePrefs>(DEFAULT_NOTICE_PREFS);
@@ -917,11 +932,64 @@ const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
     setNavDir('fwd');
     setSheet('login');
   };
-  const openSub = (which: 'theme' | 'settings' | 'about') => {
+  const openSub = (which: 'theme' | 'settings' | 'about' | 'survey') => {
     mark();
     setNavDir('fwd');
     setSub(which);
   };
+
+  /* 问卷：进来先记一次打开，够条件了就在主页底部放一张小卡片（不弹全屏遮罩） */
+  const surveyLogin = statuses.some((s) => s.valid);
+  const openSurvey = (source: 'popup' | 'mine') => {
+    if (!survey) return;
+    const url = surveyUrl(survey, { version: buildVersion, theme, shell: inShell, login: surveyLogin, source });
+    window.open(url, '_blank', 'noopener,noreferrer');
+    const next = markAsked(survey, buildVersion);
+    setSurvey(next);
+    setSurveyAsk(false);
+    void saveSurvey(next);
+  };
+  const surveyLater = () => {
+    if (!survey) return;
+    const next = markAsked(survey, buildVersion);
+    setSurvey(next);
+    setSurveyAsk(false);
+    void saveSurvey(next);
+  };
+  const surveyNever = () => {
+    if (!survey) return;
+    const next = markOptOut(survey);
+    setSurvey(next);
+    setSurveyAsk(false);
+    void saveSurvey(next);
+  };
+  const surveyDone = () => {
+    if (!survey) return;
+    const next = markSubmitted(survey);
+    setSurvey(next);
+    setSurveyAsk(false);
+    void saveSurvey(next);
+  };
+
+  useEffect(() => {
+    let alive = true;
+    let timer = 0;
+    void (async () => {
+      const loaded = await loadSurvey();
+      const next = recordLaunch(loaded);
+      if (!alive) return;
+      setSurvey(next);
+      void saveSurvey(next);
+      /* 停留 3 秒再问：进来就盖住课表最招人烦 */
+      timer = window.setTimeout(() => {
+        if (alive && shouldAsk(next, buildVersion)) setSurveyAsk(true);
+      }, 3000);
+    })();
+    return () => {
+      alive = false;
+      window.clearTimeout(timer);
+    };
+  }, []);
 
   /* —— 后退栈：手机返回键 / 侧滑返回应该「退回上一页」，而不是直接退出 App ——
      规则：往前走的动作（切栏、开二级页）由下面的 effect 自动 push 一条历史；
@@ -955,7 +1023,7 @@ const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
       setTab((t as TabKey) || 'home');
       setView(v === 'notices' ? 'notices' : 'chat');
       setSheet(s === 'login' ? 'login' : 'none');
-      setSub(b === 'theme' || b === 'settings' || b === 'about' ? b : 'none');
+      setSub(b === 'theme' || b === 'settings' || b === 'about' || b === 'survey' ? b : 'none');
     };
     window.addEventListener('popstate', onPop);
     return () => window.removeEventListener('popstate', onPop);
@@ -1003,6 +1071,15 @@ const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
             onBell={openNotices}
             onNotice={openNotices}
             onRefresh={refreshHome}
+            {...(surveyAsk
+              ? {
+                  survey: {
+                    onFill: () => openSurvey('popup'),
+                    onLater: surveyLater,
+                    onNever: surveyNever,
+                  },
+                }
+              : {})}
           />
         </div>
       )}
@@ -1050,6 +1127,11 @@ const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
           }}
           onCheckUpdate={() => void checkUpdate()}
           checking={checking}
+          onSurvey={() => {
+            setNavDir('fwd');
+            openSub('survey');
+          }}
+          surveyStatus={survey ? surveyStatusText(survey) : '30 秒，帮我把这东西做好用一点'}
           {...(remote && isNewer(remote.version, buildVersion) ? { updateVersion: remote.version } : {})}
         />
         </div>
@@ -1400,6 +1482,72 @@ const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
         </section>
       )}
 
+
+      {sub === 'survey' && (
+        <section class={`subpage${slide}`} key="survey">
+          <div class="subhead">
+            <button
+              onClick={() => {
+                setNavDir('back');
+                stepBack();
+              }}
+            >
+              ‹ 返回
+            </button>
+            <strong>反馈与问卷</strong>
+          </div>
+          <div class="tabbody">
+            <div class="card">
+              <div class="cardhead">
+                <strong>30 秒问卷</strong>
+                <span>匿名</span>
+              </div>
+              <p class="hint">想知道你平时怎么用它、哪里最别扭。填完就不再打扰；不想填，点下面「不再提醒」就行。</p>
+              <p class="hint">
+                只会带上：版本 {buildVersion}、当前配色、{inShell ? '装在 App 里' : '浏览器里打开'}、
+                {surveyLogin ? '已登录' : '未登录'} 这四项。<strong>不收登录票、学号、聊天记录</strong>。
+              </p>
+              <button class="primary wide" onClick={() => openSurvey('mine')}>
+                去填问卷 ↗
+              </button>
+              <div class="row" style="gap:8px;margin-top:10px">
+                <button class="ghost" onClick={surveyDone}>
+                  我填过了
+                </button>
+                <button class="ghost" onClick={surveyNever}>
+                  不再提醒
+                </button>
+              </div>
+              <p class="hint" style="margin-top:8px">
+                {survey ? surveyStatusText(survey) : '30 秒，帮我把这东西做好用一点'}
+              </p>
+            </div>
+
+            <div class="card">
+              <div class="cardhead">
+                <strong>其他方式</strong>
+                <span>不用问卷也行</span>
+              </div>
+              <div class="about-row">
+                <span class="k">提个 Issue</span>
+                <span class="v">
+                  <a
+                    class="link"
+                    href={`https://github.com/rebeca-aa/zzu-campus-layer/issues/new?title=${encodeURIComponent('[反馈] ')}&body=${encodeURIComponent(`版本：${buildVersion}\n\n我的问题/建议：\n`)}`}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    在 GitHub 上写，带版本号，公开可追踪
+                  </a>
+                </span>
+              </div>
+              <p class="hint">
+                不方便公开的话，也可以在「我的 → 账号」里找到联系方式；不过问卷那份最省事，只有选择题。
+              </p>
+            </div>
+          </div>
+        </section>
+      )}
 
       {sub === 'about' && (
         <section class={`subpage${slide}`} key="about">
