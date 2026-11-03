@@ -32,6 +32,19 @@ export interface ToolDefinition<A> {
 const dayArg = z.union([z.literal('today'), z.literal('tomorrow'), z.number().int().min(1).max(7)]).optional();
 const periodArg = z.union([z.literal('morning'), z.literal('afternoon'), z.literal('evening')]).optional();
 
+/** 按教室名前缀数出楼栋分布：「南1 18 · 南2 11 · 南4 12」。楼太多（>12 栋）就不给，免得刷屏。 */
+function formatBreakdown(names: string[]): string {
+  const counts = new Map<string, number>();
+  for (const name of names) {
+    const prefix = name.split('_')[0] || name;
+    counts.set(prefix, (counts.get(prefix) ?? 0) + 1);
+  }
+  if (counts.size <= 1 || counts.size > 12) return '';
+  return [...counts.entries()]
+    .sort((a, b) => a[0].localeCompare(b[0], 'zh-Hans-CN'))
+    .map(([k, v]) => `${k} ${v}`)
+    .join(' · ');
+}
 function resolveDay(day: 'today' | 'tomorrow' | number | undefined, today: string): { weekday: number; date: string; dated: boolean } {
   if (day === undefined) return { weekday: 0, date: today, dated: false };
   // 数字只是星期几，落不到具体某一天，所以不能拿它去推周次
@@ -185,13 +198,21 @@ export const findFreeRoom: ToolDefinition<{
     // 真机踩过的坑：LLM 听到「南核」会顺手补一个 campus:'南校区'，
     // 服务端先按南校区取教室，再按南1–5 前缀筛，结果必然是 0 间，
     // 还会把「那一片有 50 间空教室」当解释甩出来。所以两者同时给时，地点词说了算。
-    const place = args.building ? resolvePlace(args.building) : null;
+    let place = args.building ? resolvePlace(args.building) : null;
     let campusId: string | undefined;
-    if (args.campus && !place) {
+    if (args.campus) {
       const campuses = await svc.campuses();
       const hit = campuses.find((c) => c.name.includes(args.campus!) || c.id === args.campus);
-      if (!hit) throw new Error(`没找到校区「${args.campus}」，可用：${campuses.map((c) => c.name).join('、')}`);
-      campusId = hit.id;
+      if (hit) {
+        // 地点词优先：给了「南核」就不再按校区取教室
+        if (!place) campusId = hit.id;
+      } else {
+        // 模型还有个习惯：把「南核」直接塞进 campus。
+        // 认得出是地点词就当地点词用，别因为一句参数名报「没找到校区」。
+        const asPlace = place ?? resolvePlace(args.campus);
+        if (asPlace) place = asPlace;
+        else throw new Error(`没找到校区「${args.campus}」，可用：${campuses.map((c) => c.name).join('、')}`);
+      }
     }
     const rooms = await svc.freeRooms({
       date,
@@ -206,15 +227,39 @@ export const findFreeRoom: ToolDefinition<{
     // 不做服务端 buildingIds：那套 id 不透明、跨学期会变，名字前缀才是学生嘴里的那个东西。
     const scoped = place ? rooms.filter((r) => roomInPlace(r.room.name, place)) : rooms;
     const label = args.sections?.length ? `第 ${args.sections.join('/')} 节` : '';
+    // 教室里本来带 campusNameZh，但模型爱问「这是哪个校区」；直接把唯一校区写进标题，
+    // 再给一行按楼栋的分布，省得它自己猜。
+    const campusNames = [...new Set(scoped.map((r) => r.room.campus).filter(Boolean))] as string[];
+    const campus = campusNames.length === 1 ? campusNames[0] : '';
+    const breakdown = place ? formatBreakdown(scoped.map((r) => r.room.name)) : '';
+    // 空结果时把这次的真实条件回显出来：用户/模型都能立刻看出是「节次太窄」还是「座位数太高」。
+    const filters = [
+      place ? `地点 ${place.label}` : '',
+      args.campus && campusId ? `校区 ${args.campus}` : '',
+      args.sections?.length ? `第 ${args.sections.join('/')} 节都空` : '',
+      args.minSeats ? `至少 ${args.minSeats} 座` : '',
+      args.roomTypeIds?.length ? `教室类型 ${args.roomTypeIds.join('/')}` : '',
+    ]
+      .filter(Boolean)
+      .join('，');
     return {
       text: renderFreeRooms(byDuration(scoped), {
         date,
         sectionLabel: label,
         maxRooms: args.limit ?? 12,
+        ...(campus ? { campus } : {}),
         ...(place ? { place: place.label } : {}),
         ...(place ? { placeTotal: rooms.length } : {}),
+        ...(breakdown ? { breakdown } : {}),
+        ...(filters ? { filters } : {}),
       }),
-      data: { date, count: scoped.length, rooms: scoped, ...(place ? { place: place.label } : {}) },
+      data: {
+        date,
+        count: scoped.length,
+        rooms: scoped,
+        ...(campus ? { campus } : {}),
+        ...(place ? { place: place.label } : {}),
+      },
     };
   },
 };

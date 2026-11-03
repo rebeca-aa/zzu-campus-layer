@@ -28,6 +28,7 @@ function stub(): { svc: CampusService; calls: Array<Record<string, unknown>> } {
     ],
     freeRooms: async (opts: Record<string, unknown>) => {
       calls.push(opts);
+      if (opts.minSeats) return [];
       return [room('南4_101'), room('南2_204'), room('南区21_509', '南校区')];
     },
   } as unknown as CampusService;
@@ -42,6 +43,23 @@ describe('find_free_room 的地点词优先于校区', () => {
     expect(got.data?.count).toBe(2);
     expect(got.text).toContain('南4_101');
     expect(got.text).toContain('南核心教学区（南1–南5）');
+    expect(got.text).toContain('主校区');
+    expect(got.text).toContain('分布：南2 1 · 南4 1');
+    expect(got.data?.campus).toBe('主校区');
+  });
+
+  it('模型把楼名塞进 campus 时也当地点词用', async () => {
+    const { svc } = stub();
+    const got = await findFreeRoom.run({ campus: '南核' }, svc);
+    expect(got.data?.count).toBe(2);
+    expect(got.data?.place).toBe('南核心教学区（南1–南5）');
+  });
+
+  it('0 间时回显这次的真实条件', async () => {
+    const { svc } = stub();
+    const got = await findFreeRoom.run({ building: '南核', minSeats: 9999 }, svc);
+    expect(got.data?.count).toBe(0);
+    expect(got.text).toContain('本次条件：地点 南核心教学区（南1–南5），至少 9999 座');
   });
 
   it('只给校区时仍然按校区取教室', async () => {
