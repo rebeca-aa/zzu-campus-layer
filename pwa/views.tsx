@@ -269,13 +269,7 @@ export function HomeView(props: {
           <div class="cardhead">
             <strong>{rolled ? '明日课表' : '今日课表'}</strong>
             <span class="ch-right">
-              {needLogin && list.length === 0
-                ? ''
-                : courses === null
-                  ? '读取中…'
-                  : list.length
-                    ? `${list.length} 节 · ${new Set(list.map((c) => c.name)).size} 门`
-                    : '没有课'}
+              本周课表
               <span class="chev" aria-hidden="true">
                 ›
               </span>
@@ -616,17 +610,18 @@ function shortName(name?: string): string {
 const PERIOD_START = ['08:00', '08:55', '10:10', '11:05', '14:00', '14:55', '16:00', '16:55', '19:00', '19:55', '20:50', '21:45'];
 const PERIOD_END = ['08:45', '09:40', '10:55', '11:50', '14:45', '15:40', '16:45', '17:40', '19:45', '20:40', '21:35', '22:30'];
 /* 学期课表上给每门课一个色块：压暗一档的纯色，白字压得住，几门课挨着也分得清 */
+// 课表配色：压深、压灰一档——十来门课挨着也不刺眼，白字仍然压得住。
 const COLORS = [
-  '#7c2233',
-  '#8a4a1c',
-  '#6d6212',
-  '#2f6a3a',
-  '#1d5e66',
-  '#27497d',
-  '#4a2e78',
-  '#7a2859',
-  '#8a3a1d',
-  '#2c5a46',
+  '#4f2a33',
+  '#4f3a26',
+  '#49452a',
+  '#2c4032',
+  '#284046',
+  '#2c3b50',
+  '#3a3148',
+  '#472f3f',
+  '#4c3a2a',
+  '#2f4238',
 ];
 
 function colorOf(name: string): string {
