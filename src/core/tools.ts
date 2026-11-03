@@ -170,7 +170,7 @@ export const findFreeRoom: ToolDefinition<{
   schema: z.object({
     date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
     campus: z.string().optional(),
-    // 地点词：南核（南1/南2/南3）、北核（北1–北5）、北1、物理馆…
+    // 地点词：南核（南1–南5）、北核（北1–北5）、北1、物理馆…
     building: z.string().min(1).optional(),
     minSeats: z.number().int().min(0).optional(),
     sections: z.array(z.number().int().min(1).max(20)).optional(),

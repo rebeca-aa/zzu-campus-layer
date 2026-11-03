@@ -301,10 +301,23 @@ export interface Building {
   campusId?: string;
 }
 
+/**
+ * 楼栋列表。
+ *
+ * 坑：`/room/place/building` 不带 `campusAssoc` 会 500
+ * （`MissingServletRequestParameterException`，2026-11-03 实测），
+ * 所以这里没传校区时先查一次校区，默认取「主校区」。
+ */
 export async function jwxtBuildings(opts: JwxtOptions, campusId?: string): Promise<Building[]> {
+  let campus = campusId;
+  if (!campus) {
+    const campuses = await jwxtCampuses(opts);
+    campus = campuses.find((c) => c.name.includes('主校区'))?.id ?? campuses[0]?.id;
+    if (!campus) return [];
+  }
   const raws = await get<Array<{ id: number; nameZh?: string; name?: string; campusAssoc?: number }>>(
     EAMS_MICRO,
-    `/room/place/building${campusId ? `?campusAssoc=${campusId}` : ''}`,
+    `/room/place/building?campusAssoc=${encodeURIComponent(campus)}`,
     { token: opts.token, source: 'jwxt' },
   );
   return (raws ?? []).map((b) => ({

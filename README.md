@@ -370,7 +370,7 @@ src/core/            与环境无关的纯逻辑（node 可单测，扩展与 PW
   phrases.ts         离线说法库：340 多条「人话 → 工具」（open_service 带服务名）
   normalize.ts       口语归一化：全角/标点/语气词/错字（图书管→图书馆、饭卡→卡）
   utterance.ts       说法匹配打分：覆盖率 + 2/3 字片段相似度，两段阈值，带 schema 校验
-  place.ts           地点词 → 教室名前缀（南核 = 南1/南2/南3）
+  place.ts           地点词 → 教室名前缀（南核 = 南1–南5，含楼号正则兜底）
   walk.ts            楼间步行时间表
   study.ts           自习决策器（时长 + 距离 + 可用窗口）
   watch.ts           每日盯梢：新成绩 / 临近截止

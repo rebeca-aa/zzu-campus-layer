@@ -10,11 +10,20 @@ const room = (name: string, free = [1, 2, 3, 4]): FreeRoom => ({
 });
 
 describe('resolvePlace：口语地点 → 教室名前缀', () => {
-  it('南核 / 南核心教学区 都指南1–南3', () => {
+  it('南核 / 南核心教学区 都指南1–南5（实网 2026-11-03：南4 确实有教室）', () => {
     for (const s of ['明天南核空教室', '南核心教学区有空吗', '南核心区']) {
       const p = resolvePlace(s);
-      expect(p?.prefixes).toEqual(['南1', '南2', '南3']);
+      expect(p?.prefixes).toEqual(['南1', '南2', '南3', '南4', '南5']);
     }
+  });
+
+  it('南核 认得出南4、南6 这种后来的楼号', () => {
+    const p = resolvePlace('南核空教室')!;
+    expect(roomInPlace('南4_101', p)).toBe(true);
+    expect(roomInPlace('南6_201', p)).toBe(true);
+    expect(roomInPlace('南1_303', p)).toBe(true);
+    expect(roomInPlace('南区21_509', p)).toBe(false);
+    expect(roomInPlace('北1_101', p)).toBe(false);
   });
 
   it('北核 指北1–北5', () => {
@@ -47,6 +56,7 @@ describe('roomInPlace：前缀匹配', () => {
     const south = resolvePlace('南核')!;
     expect(roomInPlace('南1_303', south)).toBe(true);
     expect(roomInPlace('南2_406', south)).toBe(true);
+    expect(roomInPlace('南4_106', south)).toBe(true);
     expect(roomInPlace('北1_101', south)).toBe(false);
     expect(roomInPlace('北区2_101', south)).toBe(false);
   });

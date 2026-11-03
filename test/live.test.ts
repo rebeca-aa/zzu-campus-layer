@@ -64,7 +64,7 @@ describe.skipIf(!enabled)('实网回归（郑大）', () => {
     }
   });
 
-  it('「明天南核空教室」只回南1–南3 的教室（地点词真的生效）', async () => {
+  it('「明天南核空教室」只回南1–南5 的教室（地点词真的生效，南4 也算）', async () => {
     const today = new Date(Date.now() + 8 * 3_600_000).toISOString().slice(0, 10);
     const got = await ask('明天南核空教室', { jwxtToken: jwxt!, ...(portal ? { portalToken: portal } : {}), today });
     expect(got.tool).toBe('find_free_room');
@@ -74,7 +74,7 @@ describe.skipIf(!enabled)('实网回归（郑大）', () => {
       expect(got.text).toContain('南核心教学区');
       return;
     }
-    for (const r of rooms) expect(r.room.name).toMatch(/^南[123][_\s（(]/);
+    for (const r of rooms) expect(r.room.name).toMatch(/^南[1-9]\d*[_\s（(]/);
   });
 
   it('用户报的三个失败说法，规则层现在要接得住（无模型）', async () => {
