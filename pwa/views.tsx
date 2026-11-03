@@ -20,10 +20,10 @@ export type TabKey = 'home' | 'ai' | 'schedule' | 'mine';
 /** 一次工具调用的结果；失败时 ok=false，error 是给人看的一句话 */
 export type Caller = (name: string, args?: Record<string, unknown>) => Promise<{ ok: boolean; data?: any; error?: string }>;
 
+/* 底部三栏：课表不再单独占一格，改成点主页的课表卡片进去 */
 const TABS: { key: TabKey; label: string }[] = [
   { key: 'home', label: '主页' },
   { key: 'ai', label: 'AI' },
-  { key: 'schedule', label: '学期课表' },
   { key: 'mine', label: '我的' },
 ];
 
@@ -73,10 +73,12 @@ function TabIcon({ name }: { name: TabKey }) {
 }
 
 export function TabBar({ tab, onTab }: { tab: TabKey; onTab: (t: TabKey) => void }) {
+  /* 课表页不是底部入口，但它是从主页点进来的，所以高亮仍然停在「主页」 */
+  const shown: TabKey = tab === 'schedule' ? 'home' : tab;
   return (
     <nav class="tabbar">
       {TABS.map((t) => (
-        <button class={t.key === tab ? 'on' : ''} onClick={() => onTab(t.key)} key={t.key}>
+        <button class={t.key === shown ? 'on' : ''} onClick={() => onTab(t.key)} key={t.key}>
           <span class="ic">
             <TabIcon name={t.key} />
           </span>
@@ -132,6 +134,8 @@ export function HomeView(props: {
   onBell: () => void;
   unread: number;
   onRefresh: () => void;
+  /** 点课表卡片进本周课表页 */
+  onOpenSchedule: () => void;
   busy: boolean;
   /** 课表下面那几条自定义栏：点长条直接把话发给 AI；右侧小「+」打开设置窗，统一增删改 */
   bars: HomeBar[];
@@ -249,10 +253,22 @@ export function HomeView(props: {
       </header>
 
       <main class="tabbody">
-        <section class="card">
+        <section
+          class="card card-tap"
+          role="button"
+          tabIndex={0}
+          aria-label="打开本周课表"
+          onClick={props.onOpenSchedule}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              props.onOpenSchedule();
+            }
+          }}
+        >
           <div class="cardhead">
             <strong>{rolled ? '明日课表' : '今日课表'}</strong>
-            <span>
+            <span class="ch-right">
               {needLogin && list.length === 0
                 ? ''
                 : courses === null
@@ -260,6 +276,9 @@ export function HomeView(props: {
                   : list.length
                     ? `${list.length} 节 · ${new Set(list.map((c) => c.name)).size} 门`
                     : '没有课'}
+              <span class="chev" aria-hidden="true">
+                ›
+              </span>
             </span>
           </div>
           {needLogin && list.length === 0 ? (
@@ -269,7 +288,13 @@ export function HomeView(props: {
               {err && (
                 <p class="empty-line">
                   {err}
-                  <button class="link" onClick={props.onRefresh}>
+                  <button
+                    class="link"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      props.onRefresh();
+                    }}
+                  >
                     重试
                   </button>
                 </p>
@@ -590,7 +615,19 @@ function shortName(name?: string): string {
 
 const PERIOD_START = ['08:00', '08:55', '10:10', '11:05', '14:00', '14:55', '16:00', '16:55', '19:00', '19:55', '20:50', '21:45'];
 const PERIOD_END = ['08:45', '09:40', '10:55', '11:50', '14:45', '15:40', '16:45', '17:40', '19:45', '20:40', '21:35', '22:30'];
-const COLORS = ['#6a2f6d', '#255f63', '#4b3a7a', '#4f5c22', '#5a4632', '#6b3a2c', '#62501f', '#2f4a6b', '#7a3550', '#2d6355'];
+/* 学期课表上给每门课一个色块：压暗一档的纯色，白字压得住，几门课挨着也分得清 */
+const COLORS = [
+  '#7c2233',
+  '#8a4a1c',
+  '#6d6212',
+  '#2f6a3a',
+  '#1d5e66',
+  '#27497d',
+  '#4a2e78',
+  '#7a2859',
+  '#8a3a1d',
+  '#2c5a46',
+];
 
 function colorOf(name: string): string {
   /* FNV-1a：比 h*31 散得开，几门课的色块不会挤在同一两个颜色上 */
@@ -676,6 +713,8 @@ export function ScheduleView(props: {
   term: Term | null;
   today: string;
   refreshKey: number;
+  /** 回主页：底部已经没有课表入口，靠这个返回 */
+  onBack: () => void;
 }) {
   const { call, term, today } = props;
   /**
@@ -766,6 +805,9 @@ export function ScheduleView(props: {
       <header class="top">
         <div class="who">
           <div class="termline">
+            <button class="back" onClick={props.onBack} aria-label="回主页">
+              ‹
+            </button>
             {termLabel(term)}
             <span class="caret">▾</span>
           </div>

@@ -20,7 +20,6 @@
     "e2e": "node scripts/e2e.mjs",
     "pwa:serve": "node scripts/serve-pwa.mjs",
     "pwa:shot": "node scripts/pwa-shot.mjs",
-    "pwa:quick": "node scripts/pwa-quickask.mjs",
     "pwa:transcript": "node scripts/pwa-transcript.mjs",
     "verify": "node node_modules/typescript/lib/tsc.js --noEmit && node node_modules/vitest/vitest.mjs run && node node_modules/vite/bin/vite.js build"
   },

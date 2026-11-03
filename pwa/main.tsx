@@ -22,16 +22,7 @@ import {
 } from '../src/core/storage';
 import { LlmFields } from '../src/ui/llm-fields';
 import { LoginPage } from './login-card';
-import { QuickAskBar, QuickAskEditor } from '../src/ui/quick-asks';
 import { CampusMap, RichText, download } from '../src/ui/rich';
-import {
-  defaultQuickAsks,
-  loadQuickAsks,
-  removeQuickAsk,
-  resetQuickAsks,
-  saveQuickAsks,
-  type QuickAsk,
-} from '../src/core/quickAsk';
 import { loadHomeBars, saveHomeBars, type HomeBar } from '../src/core/homeBars';
 import { noticesToIcs } from '../src/core/ics';
 import { loadTranscript, saveTranscript, trimTranscript } from '../src/core/transcript';
@@ -292,11 +283,8 @@ const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
   const [noticeBusy, setNoticeBusy] = useState(false);
   const [noticeError, setNoticeError] = useState('');
   const [noticePrefs, setNoticePrefsState] = useState<NoticePrefs>(DEFAULT_NOTICE_PREFS);
-  /* 输入框上面那排常用语：可加、可删、可上下挪，自己维护顺序 */
-  const [quickAsks, setQuickAsks] = useState<QuickAsk[]>(defaultQuickAsks);
   /* 主页课表下面的自定义栏（长条 + 右侧「+」），存 homeBars */
   const [homeBars, setHomeBars] = useState<HomeBar[]>([]);
-  const [quickEditing, setQuickEditing] = useState(false);
   const [today] = useState(todayShanghai());
   /* 首页课表：20 点后自动显示「明天」的那张，过点后定时翻页 */
   const [homeDay, setHomeDay] = useState(() => displayDayShanghai());
@@ -355,7 +343,6 @@ const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
       /* 上次没发出去的半句话，接回来 */
       const draft = await getKV().get<string>('draft');
       if (typeof draft === 'string' && draft) setInput(draft);
-      setQuickAsks(await loadQuickAsks());
       setHomeBars(await loadHomeBars());
       // 上次聊的那几条带回来：换页面/重开不该从空白开始
       const items = await loadTranscript<Message>();
@@ -364,20 +351,10 @@ const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
       hydrated.current = true;
   }
 
-  /** 常用语变了：先把界面换掉（点一下就有反应），再异步落库。 */
-  function patchQuickAsks(next: QuickAsk[]): void {
-    setQuickAsks(next);
-    void saveQuickAsks(next).catch(() => undefined);
-  }
-
   /** 主页自定义栏变了：同样先换界面，再异步落库。 */
   function patchHomeBars(next: HomeBar[]): void {
     setHomeBars(next);
     void saveHomeBars(next).catch(() => undefined);
-  }
-
-  async function resetQuickAskList(): Promise<void> {
-    setQuickAsks(await resetQuickAsks());
   }
 
   /** 手机端直接跑工具（没有 background），卡片管线与桌面完全同一条。 */
@@ -1181,6 +1158,7 @@ const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
             unread={unread}
             onBell={openNotices}
             onRefresh={refreshHome}
+            onOpenSchedule={() => goTab('schedule')}
             bars={homeBars}
             onBarsChange={patchHomeBars}
             onPickBar={(text) => {
@@ -1203,7 +1181,13 @@ const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
 
       {tab === 'schedule' && (
         <div class="page-live" key="schedule">
-          <ScheduleView call={call} term={term} today={today} refreshKey={homeRefresh} />
+          <ScheduleView
+            call={call}
+            term={term}
+            today={today}
+            refreshKey={homeRefresh}
+            onBack={() => goTab('home')}
+          />
         </div>
       )}
 
@@ -1281,11 +1265,6 @@ const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
           <div class="chat-empty">
             <p class="ce-title">问点什么？</p>
             <p class="ce-sub">课表、空教室、图书馆、校园卡，直接用平常话说就行。</p>
-            {(quickAsks.length ? quickAsks.slice(0, 3) : []).map((q) => (
-              <button class="ce-ask" key={q.id} onClick={() => void submit(q.text)}>
-                {q.label}
-              </button>
-            ))}
           </div>
         )}
 
@@ -1349,32 +1328,6 @@ const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
         <>
           <div class="dock">
         <img class="deco" src="./deco.png" alt="" aria-hidden="true" />
-        {quickEditing && (
-          <QuickAskEditor
-            items={quickAsks}
-            onChange={patchQuickAsks}
-            onClose={() => setQuickEditing(false)}
-            onReset={() => void resetQuickAskList()}
-          />
-        )}
-        <QuickAskBar
-          items={quickAsks}
-          disabled={busy}
-          editing={quickEditing}
-          onEdit={() => setQuickEditing((v) => !v)}
-          onRemove={(id) => {
-            const hit = quickAsks.find((q) => q.id === id);
-            if (!hit) return;
-            if (!window.confirm(`删掉常用语「${hit.label}」？`)) return;
-            const next = removeQuickAsk(quickAsks, id);
-            setQuickAsks(next);
-            void saveQuickAsks(next);
-          }}
-          onPick={(text) => {
-            setQuickEditing(false);
-            void submit(text);
-          }}
-        />
 
           <form
             class="composer"
