@@ -2,6 +2,15 @@ import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import type { Course, Term } from '../src/core/types';
 import { currentWeekOf } from '../src/core/util';
 import { ageText, readCache, writeCache } from '../src/core/offline';
+import {
+  MAX_HOME_BARS,
+  MAX_HOME_BAR_LABEL,
+  MAX_HOME_BAR_TEXT,
+  addHomeBar,
+  removeHomeBar,
+  updateHomeBar,
+  type HomeBar,
+} from '../src/core/homeBars';
 
 export type TabKey = 'home' | 'ai' | 'schedule' | 'mine';
 
@@ -121,6 +130,10 @@ export function HomeView(props: {
   unread: number;
   onRefresh: () => void;
   busy: boolean;
+  /** 课表下面那几条自定义栏：点长条去 AI 栏填话，点右边白方块「+」就地编辑 */
+  bars: HomeBar[];
+  onBarsChange: (next: HomeBar[]) => void;
+  onPickBar: (text: string) => void;
   /** 该问问卷时给一份文案和三个动作；不给就不显示 */
   survey?: { onFill: () => void; onLater: () => void; onNever: () => void } | null;
 }) {
@@ -279,6 +292,8 @@ export function HomeView(props: {
           </div>
         </section>
 
+        <HomeBars bars={props.bars} onChange={props.onBarsChange} onPick={props.onPickBar} />
+
         {props.survey && (
           <section class="survey-ask">
             <div class="sa-head">
@@ -301,6 +316,122 @@ export function HomeView(props: {
         )}
       </main>
     </>
+  );
+}
+
+/**
+ * 主页课表下面的自定义栏。
+ * 每条一行长条（标题 + 要发给 AI 的话），右边留一格白方块「+」；点长条去 AI 栏填话，点「+」编辑这条。
+ */
+function HomeBars(props: {
+  bars: HomeBar[];
+  onChange: (next: HomeBar[]) => void;
+  onPick: (text: string) => void;
+}) {
+  /* null = 没在编辑；id 为 null 表示新建 */
+  const [edit, setEdit] = useState<{ id: string | null; label: string; text: string; error: string } | null>(null);
+
+  const open = (bar?: HomeBar) =>
+    setEdit(
+      bar
+        ? { id: bar.id, label: bar.label, text: bar.text, error: '' }
+        : { id: null, label: '', text: '', error: '' },
+    );
+
+  const save = () => {
+    if (!edit) return;
+    try {
+      const next = edit.id
+        ? updateHomeBar(props.bars, edit.id, { label: edit.label, text: edit.text })
+        : addHomeBar(props.bars, edit.text, edit.label);
+      props.onChange(next);
+      setEdit(null);
+    } catch (e) {
+      setEdit({ ...edit, error: e instanceof Error ? e.message : String(e) });
+    }
+  };
+
+  const remove = () => {
+    if (!edit?.id) return;
+    if (!window.confirm('删掉这条自定义栏？')) return;
+    props.onChange(removeHomeBar(props.bars, edit.id));
+    setEdit(null);
+  };
+
+  const editor = edit ? (
+    <div class="bar-editor">
+      <label>
+        <span>标题</span>
+        <input
+          value={edit.label}
+          maxLength={MAX_HOME_BAR_LABEL}
+          placeholder="比如「问空教室」"
+          onInput={(e) => setEdit({ ...edit, label: (e.target as HTMLInputElement).value, error: '' })}
+        />
+      </label>
+      <label>
+        <span>发给 AI 的文本</span>
+        <textarea
+          value={edit.text}
+          maxLength={MAX_HOME_BAR_TEXT}
+          rows={3}
+          placeholder="点这条栏会把这句填进 AI 输入框，比如「明天上午主校区有空教室吗」"
+          onInput={(e) => setEdit({ ...edit, text: (e.target as HTMLTextAreaElement).value, error: '' })}
+        />
+      </label>
+      {edit.error ? <p class="hint warn">{edit.error}</p> : null}
+      <div class="be-acts">
+        <button type="button" class="primary" onClick={save}>
+          保存
+        </button>
+        <button type="button" class="ghost" onClick={() => setEdit(null)}>
+          取消
+        </button>
+        {edit.id ? (
+          <button type="button" class="ghost bar-del" onClick={remove}>
+            删除
+          </button>
+        ) : null}
+      </div>
+    </div>
+  ) : null;
+
+  return (
+    <section class="bars" aria-label="自定义栏">
+      {props.bars.map((bar) => (
+        <div class="bar-item" key={bar.id}>
+          <div class="bar-row">
+            <button
+              type="button"
+              class="bar"
+              onClick={() => props.onPick(bar.text)}
+              title={bar.text === bar.label ? undefined : bar.text}
+            >
+              <span class="bar-t">{bar.label}</span>
+              <span class="bar-s">{bar.text}</span>
+            </button>
+            <button type="button" class="bar-plus" aria-label={`编辑「${bar.label}」`} onClick={() => open(bar)}>
+              +
+            </button>
+          </div>
+          {edit?.id === bar.id ? editor : null}
+        </div>
+      ))}
+      {props.bars.length < MAX_HOME_BARS ? (
+        <div class="bar-item">
+          <div class="bar-row">
+            <button type="button" class="bar ghost" onClick={() => open()}>
+              <span class="bar-t">添加自定义栏</span>
+              <span class="bar-s">标题 + 一句要发给 AI 的话</span>
+            </button>
+            <button type="button" class="bar-plus" aria-label="添加自定义栏" onClick={() => open()}>
+              +
+            </button>
+          </div>
+          {edit && edit.id === null ? editor : null}
+        </div>
+      ) : null}
+    </section>
   );
 }
 

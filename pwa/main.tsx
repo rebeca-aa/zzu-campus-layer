@@ -32,6 +32,7 @@ import {
   saveQuickAsks,
   type QuickAsk,
 } from '../src/core/quickAsk';
+import { loadHomeBars, saveHomeBars, type HomeBar } from '../src/core/homeBars';
 import { noticesToIcs } from '../src/core/ics';
 import { loadTranscript, saveTranscript, trimTranscript } from '../src/core/transcript';
 import type { NoticeCard, TodayDigest } from '../src/core/notice';
@@ -293,6 +294,8 @@ const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
   const [noticePrefs, setNoticePrefsState] = useState<NoticePrefs>(DEFAULT_NOTICE_PREFS);
   /* 输入框上面那排常用语：可加、可删、可上下挪，自己维护顺序 */
   const [quickAsks, setQuickAsks] = useState<QuickAsk[]>(defaultQuickAsks);
+  /* 主页课表下面的自定义栏（长条 + 右侧「+」），存 homeBars */
+  const [homeBars, setHomeBars] = useState<HomeBar[]>([]);
   const [quickEditing, setQuickEditing] = useState(false);
   const [today] = useState(todayShanghai());
   /* 首页课表：20 点后自动显示「明天」的那张，过点后定时翻页 */
@@ -353,6 +356,7 @@ const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
       const draft = await getKV().get<string>('draft');
       if (typeof draft === 'string' && draft) setInput(draft);
       setQuickAsks(await loadQuickAsks());
+      setHomeBars(await loadHomeBars());
       // 上次聊的那几条带回来：换页面/重开不该从空白开始
       const items = await loadTranscript<Message>();
       restored.current = items;
@@ -364,6 +368,12 @@ const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
   function patchQuickAsks(next: QuickAsk[]): void {
     setQuickAsks(next);
     void saveQuickAsks(next).catch(() => undefined);
+  }
+
+  /** 主页自定义栏变了：同样先换界面，再异步落库。 */
+  function patchHomeBars(next: HomeBar[]): void {
+    setHomeBars(next);
+    void saveHomeBars(next).catch(() => undefined);
   }
 
   async function resetQuickAskList(): Promise<void> {
@@ -1171,6 +1181,15 @@ const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
             unread={unread}
             onBell={openNotices}
             onRefresh={refreshHome}
+            bars={homeBars}
+            onBarsChange={patchHomeBars}
+            onPickBar={(text) => {
+              /* 点长条：只把话填进输入框，发不发由用户决定 */
+              setInput(text);
+              void getKV().set('draft', text);
+              goTab('ai');
+              window.setTimeout(() => document.querySelector<HTMLInputElement>('.composer input')?.focus(), 280);
+            }}
             {...(surveyAsk
               ? {
                   survey: {
