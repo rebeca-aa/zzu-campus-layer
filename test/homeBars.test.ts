@@ -1,14 +1,19 @@
 import { describe, expect, it } from 'vitest';
 import {
+  CARD_HOME_BAR_ID,
   HOME_BARS_KEY,
+  HOME_BARS_VERSION,
   MAX_HOME_BARS,
   MAX_HOME_BAR_LABEL,
   MAX_HOME_BAR_TEXT,
   addHomeBar,
+  createCardBar,
+  isCardBar,
   loadHomeBars,
   normalizeHomeBars,
   removeHomeBar,
   saveHomeBars,
+  setCardBarVisible,
   updateHomeBar,
   type HomeBar,
 } from '../src/core/homeBars';
@@ -78,13 +83,27 @@ describe('normalizeHomeBars', () => {
 });
 
 describe('loadHomeBars / saveHomeBars', () => {
-  it('没存过就是空列表', async () => {
-    expect(await loadHomeBars(memKV())).toEqual([]);
+  it('没存过就自带图书馆、空教室和一卡通三条', async () => {
+    const bars = await loadHomeBars(memKV());
+    expect(bars.map((b) => b.label)).toEqual(['图书馆', '空教室', '校园卡']);
+    expect(bars.map((b) => b.text)).toEqual(['今天图书馆一楼空余座位图', '南核空教室', '']);
+    expect(isCardBar(bars[2]!)).toBe(true);
   });
 
-  it('存坏了也回落成空列表', async () => {
-    expect(await loadHomeBars(memKV({ [HOME_BARS_KEY]: { v: 1, items: 'oops' } }))).toEqual([]);
-    expect(await loadHomeBars(memKV({ [HOME_BARS_KEY]: 42 }))).toEqual([]);
+  it('存坏了也回落成默认三条', async () => {
+    expect((await loadHomeBars(memKV({ [HOME_BARS_KEY]: { v: 1, items: 'oops' } }))).length).toBe(3);
+    expect((await loadHomeBars(memKV({ [HOME_BARS_KEY]: 42 }))).length).toBe(3);
+  });
+
+  it('v1 老数据补上默认两条和一卡通，用户的栏留在前面', async () => {
+    const kv = memKV({ [HOME_BARS_KEY]: { v: 1, items: [{ id: 'x', label: '查卡', text: '我卡里还有多少钱' }] } });
+    const bars = await loadHomeBars(kv);
+    expect(bars.map((b) => b.label)).toEqual(['查卡', '图书馆', '空教室', '校园卡']);
+    expect(isCardBar(bars[bars.length - 1]!)).toBe(true);
+  });
+
+  it('v2 明确存了空列表就是空列表，不再塞默认', async () => {
+    expect(await loadHomeBars(memKV({ [HOME_BARS_KEY]: { v: HOME_BARS_VERSION, items: [] } }))).toEqual([]);
   });
 
   it('存进去的是洗过的版本，读出来一样', async () => {
@@ -92,6 +111,28 @@ describe('loadHomeBars / saveHomeBars', () => {
     const saved = await saveHomeBars([{ id: 'a', label: ' 标题 ', text: ' 内容 ' }], kv);
     expect(saved).toEqual([{ id: 'a', label: '标题', text: '内容' }]);
     expect(await loadHomeBars(kv)).toEqual(saved);
+  });
+});
+
+describe('一卡通栏', () => {
+  it('开 / 关只动最后那一条', () => {
+    const chat = list('a', 'b');
+    const on = setCardBarVisible(chat, true);
+    expect(on.length).toBe(3);
+    expect(isCardBar(on[2]!)).toBe(true);
+    expect(setCardBarVisible(on, false).map((b) => b.label)).toEqual(['a', 'b']);
+  });
+
+  it('只认一条，标签缺省叫校园卡', () => {
+    const out = normalizeHomeBars([{ kind: 'card' }, { kind: 'card' }, { label: 'x', text: 'y' }]);
+    expect(out?.length).toBe(2);
+    expect(out?.[0]).toEqual({ id: CARD_HOME_BAR_ID, kind: 'card', label: '校园卡', text: '' });
+  });
+
+  it('改 / 加都不影响一卡通', () => {
+    const card = createCardBar();
+    expect(updateHomeBar([card], CARD_HOME_BAR_ID, { text: 'x' })).toEqual([card]);
+    expect(removeHomeBar([...list('a'), card], CARD_HOME_BAR_ID).map((b) => b.id)).toEqual(['id-0']);
   });
 });
 

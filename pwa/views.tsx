@@ -8,6 +8,9 @@ import {
   MAX_HOME_BAR_LABEL,
   MAX_HOME_BAR_TEXT,
   addHomeBar,
+  createCardBar,
+  isCardBar,
+  setCardBarVisible,
   updateHomeBar,
   type HomeBar,
 } from '../src/core/homeBars';
@@ -130,7 +133,7 @@ export function HomeView(props: {
   unread: number;
   onRefresh: () => void;
   busy: boolean;
-  /** 课表下面那几条自定义栏：点长条去 AI 栏填话；板块右上角小「+」打开设置窗，统一增删改 */
+  /** 课表下面那几条自定义栏：点长条直接把话发给 AI；右侧小「+」打开设置窗，统一增删改 */
   bars: HomeBar[];
   onBarsChange: (next: HomeBar[]) => void;
   onPickBar: (text: string) => void;
@@ -175,6 +178,27 @@ export function HomeView(props: {
     if (courses === null) return;
     writeHomeCache(today, { courses, week, at: Date.now() });
   }, [courses, week, today]);
+
+  /* 一卡通栏：不走会话，直接问一次余额；点长条再刷新 */
+  const cardShown = props.bars.some(isCardBar);
+  const [cardBal, setCardBal] = useState('');
+  const [cardBusy, setCardBusy] = useState(false);
+
+  const loadCard = () => {
+    setCardBusy(true);
+    void (async () => {
+      const res = await call('get_card');
+      const bal = res.ok ? ((res.data as any)?.data ?? res.data)?.balance : undefined;
+      setCardBal(bal === undefined ? '点一下再试' : `¥ ${Number(bal).toFixed(2)}`);
+      setCardBusy(false);
+    })();
+  };
+
+  useEffect(() => {
+    if (!cardShown) return;
+    loadCard();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cardShown, refreshKey]);
 
   const nowMin = minutesOf(`${pad(new Date().getHours())}:${pad(new Date().getMinutes())}`);
   const list = courses ?? [];
@@ -292,7 +316,14 @@ export function HomeView(props: {
           </div>
         </section>
 
-        <HomeBars bars={props.bars} onChange={props.onBarsChange} onPick={props.onPickBar} />
+        <HomeBars
+          bars={props.bars}
+          onChange={props.onBarsChange}
+          onPick={props.onPickBar}
+          cardText={cardBal}
+          cardBusy={cardBusy}
+          onCardClick={loadCard}
+        />
 
         {props.survey && (
           <section class="survey-ask">
@@ -321,13 +352,15 @@ export function HomeView(props: {
 
 /**
  * 主页课表下面的自定义栏。
- * 每条一行长条（标题 + 要发给 AI 的话），点长条去 AI 栏填话。
- * 板块右上角只留一个小「+」，点开弹出设置窗，统一增删改所有栏。
+ * 每条一行长条（标题 + 要发给 AI 的话），点长条直接把话发出去。
+ * 板块右上角只留一个小「+」，点开弹出设置窗，统一增删改所有栏；
+ * 设置窗里另有「校园卡」开关：开了就多一条只查余额、不进会话的长条。
  */
 interface BarDraft {
   /** 编辑期间的行 key；新建行还没有 id */
   key: string;
   id: string | null;
+  kind: 'chat' | 'card';
   label: string;
   text: string;
 }
@@ -336,13 +369,20 @@ let draftSeq = 0;
 const newDraftKey = () => `d${(draftSeq += 1)}`;
 
 function draftOf(bars: HomeBar[]): BarDraft[] {
-  return bars.map((bar) => ({ key: bar.id, id: bar.id, label: bar.label, text: bar.text }));
+  return bars.map((bar) => {
+    const kind = bar.kind ?? 'chat';
+    return { key: bar.id, id: bar.id, kind, label: bar.label, text: kind === 'card' ? '' : bar.text };
+  });
 }
 
 function HomeBars(props: {
   bars: HomeBar[];
   onChange: (next: HomeBar[]) => void;
   onPick: (text: string) => void;
+  /** 一卡通栏上显示的余额文案 / 正在查 / 点一下刷新 */
+  cardText: string;
+  cardBusy: boolean;
+  onCardClick: () => void;
 }) {
   /* null = 设置窗关着；数组里是正在编辑的整份列表 */
   const [sheet, setSheet] = useState<BarDraft[] | null>(null);
@@ -365,8 +405,8 @@ function HomeBars(props: {
 
   const addRow = () => {
     setSheet((rows) => {
-      if (!rows || rows.length >= MAX_HOME_BARS) return rows;
-      return [...rows, { key: newDraftKey(), id: null, label: '', text: '' }];
+      if (!rows || rows.filter((row) => row.kind !== 'card').length >= MAX_HOME_BARS) return rows;
+      return [...rows, { key: newDraftKey(), id: null, kind: 'chat', label: '', text: '' }];
     });
     setError('');
   };
@@ -376,12 +416,26 @@ function HomeBars(props: {
     setError('');
   };
 
+  /* 校园卡开关：只在设置窗里改草稿，点保存才生效 */
+  const toggleCard = () => {
+    setSheet((rows) => {
+      if (!rows) return rows;
+      if (rows.some((row) => row.kind === 'card')) return rows.filter((row) => row.kind !== 'card');
+      const card = createCardBar();
+      return [...rows, { key: card.id, id: card.id, kind: 'card' as const, label: card.label, text: '' }];
+    });
+    setError('');
+  };
+
+  const chatRows = sheet ? sheet.filter((row) => row.kind !== 'card') : [];
+  const cardOn = Boolean(sheet?.some((row) => row.kind === 'card'));
+
   const saveAll = () => {
     if (!sheet) return;
     try {
-      /* 老栏按原顺序留下，再逐条套用改动；新栏接在后面 */
-      let next = props.bars.filter((bar) => sheet.some((row) => row.id === bar.id));
-      for (const row of sheet) {
+      /* 老栏按原顺序留下（一卡通归开关管），再逐条套用改动；新栏接在后面 */
+      let next = props.bars.filter((bar) => !isCardBar(bar) && chatRows.some((row) => row.id === bar.id));
+      for (const row of chatRows) {
         const text = row.text.trim();
         const label = row.label.trim();
         /* 整行空着就当没加 */
@@ -392,7 +446,7 @@ function HomeBars(props: {
             ? updateHomeBar(next, row.id, { label, text })
             : addHomeBar(next, text, label);
       }
-      props.onChange(next);
+      props.onChange(setCardBarVisible(next, cardOn));
       closeSheet();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -422,20 +476,33 @@ function HomeBars(props: {
           +
         </button>
       </div>
-      {props.bars.map((bar) => (
-        <button
-          type="button"
-          class="bar"
-          key={bar.id}
-          onClick={() => props.onPick(bar.text)}
-          title={bar.text === bar.label ? undefined : bar.text}
-        >
-          <span class="bar-t">{bar.label}</span>
-          <span class="bar-s">{bar.text}</span>
-        </button>
-      ))}
+      {props.bars.map((bar) =>
+        isCardBar(bar) ? (
+          <button
+            type="button"
+            class="bar bar-card"
+            key={bar.id}
+            onClick={props.onCardClick}
+            title="点一下刷新一卡通余额"
+          >
+            <span class="bar-t">{bar.label}</span>
+            <span class="bar-s">{props.cardBusy ? '正在查余额…' : props.cardText || '点一下查余额'}</span>
+          </button>
+        ) : (
+          <button
+            type="button"
+            class="bar"
+            key={bar.id}
+            onClick={() => props.onPick(bar.text)}
+            title={bar.text === bar.label ? undefined : bar.text}
+          >
+            <span class="bar-t">{bar.label}</span>
+            <span class="bar-s">{bar.text}</span>
+          </button>
+        ),
+      )}
       {props.bars.length === 0 ? (
-        <p class="bars-empty">点右上角 + 加自定义栏，点栏就把话带进 AI 输入框。</p>
+        <p class="bars-empty">点右上角 + 加自定义栏，点一下就把话发给 AI。</p>
       ) : null}
       {sheet
         ? createPortal(
@@ -449,11 +516,24 @@ function HomeBars(props: {
                 <div class="bs-head">
                   <strong>自定义栏</strong>
                   <span class="bs-count">
-                    {sheet.length} / {MAX_HOME_BARS}
+                    {chatRows.length} / {MAX_HOME_BARS}
                   </span>
                 </div>
+                <button
+                  type="button"
+                  class={`bs-switch${cardOn ? ' on' : ''}`}
+                  role="switch"
+                  aria-checked={cardOn}
+                  onClick={toggleCard}
+                >
+                  <span class="bs-switch-t">
+                    校园卡
+                    <em>只查余额，不进会话</em>
+                  </span>
+                  <span class="bs-switch-knob" aria-hidden="true" />
+                </button>
                 <div class="bs-list">
-                  {sheet.map((row) => (
+                  {chatRows.map((row) => (
                     <div class="bs-row" key={row.key}>
                       <div class="bs-top">
                         <input
@@ -472,16 +552,16 @@ function HomeBars(props: {
                         value={row.text}
                         rows={2}
                         maxLength={MAX_HOME_BAR_TEXT}
-                        placeholder="点这条栏会把这句填进 AI 输入框"
+                        placeholder="点这条栏会把这句直接发给 AI"
                         onInput={(e) => patchRow(row.key, { text: (e.target as HTMLTextAreaElement).value })}
                       />
                     </div>
                   ))}
-                  {sheet.length === 0 ? <p class="bars-empty">还没有自定义栏，点下面「加一条」。</p> : null}
+                  {chatRows.length === 0 ? <p class="bars-empty">还没有自定义栏，点下面「加一条」。</p> : null}
                 </div>
                 {error ? <p class="hint warn">{error}</p> : null}
                 <div class="bs-acts">
-                  <button type="button" class="ghost" onClick={addRow} disabled={sheet.length >= MAX_HOME_BARS}>
+                  <button type="button" class="ghost" onClick={addRow} disabled={chatRows.length >= MAX_HOME_BARS}>
                     加一条
                   </button>
                   <span class="bs-space" />

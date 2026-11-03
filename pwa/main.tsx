@@ -1184,11 +1184,9 @@ const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
             bars={homeBars}
             onBarsChange={patchHomeBars}
             onPickBar={(text) => {
-              /* 点长条：只把话填进输入框，发不发由用户决定 */
-              setInput(text);
-              void getKV().set('draft', text);
+              /* 点长条：切到 AI 栏，直接把这句话发出去 */
               goTab('ai');
-              window.setTimeout(() => document.querySelector<HTMLInputElement>('.composer input')?.focus(), 280);
+              void submit(text);
             }}
             {...(surveyAsk
               ? {
