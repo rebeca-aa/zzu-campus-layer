@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
+import { createPortal } from 'preact/compat';
 import type { Course, Term } from '../src/core/types';
 import { currentWeekOf } from '../src/core/util';
 import { ageText, readCache, writeCache } from '../src/core/offline';
@@ -7,7 +8,6 @@ import {
   MAX_HOME_BAR_LABEL,
   MAX_HOME_BAR_TEXT,
   addHomeBar,
-  removeHomeBar,
   updateHomeBar,
   type HomeBar,
 } from '../src/core/homeBars';
@@ -130,7 +130,7 @@ export function HomeView(props: {
   unread: number;
   onRefresh: () => void;
   busy: boolean;
-  /** 课表下面那几条自定义栏：点长条去 AI 栏填话，点右边白方块「+」就地编辑 */
+  /** 课表下面那几条自定义栏：点长条去 AI 栏填话；板块右上角小「+」打开设置窗，统一增删改 */
   bars: HomeBar[];
   onBarsChange: (next: HomeBar[]) => void;
   onPickBar: (text: string) => void;
@@ -321,116 +321,182 @@ export function HomeView(props: {
 
 /**
  * 主页课表下面的自定义栏。
- * 每条一行长条（标题 + 要发给 AI 的话），右边留一格白方块「+」；点长条去 AI 栏填话，点「+」编辑这条。
+ * 每条一行长条（标题 + 要发给 AI 的话），点长条去 AI 栏填话。
+ * 板块右上角只留一个小「+」，点开弹出设置窗，统一增删改所有栏。
  */
+interface BarDraft {
+  /** 编辑期间的行 key；新建行还没有 id */
+  key: string;
+  id: string | null;
+  label: string;
+  text: string;
+}
+
+let draftSeq = 0;
+const newDraftKey = () => `d${(draftSeq += 1)}`;
+
+function draftOf(bars: HomeBar[]): BarDraft[] {
+  return bars.map((bar) => ({ key: bar.id, id: bar.id, label: bar.label, text: bar.text }));
+}
+
 function HomeBars(props: {
   bars: HomeBar[];
   onChange: (next: HomeBar[]) => void;
   onPick: (text: string) => void;
 }) {
-  /* null = 没在编辑；id 为 null 表示新建 */
-  const [edit, setEdit] = useState<{ id: string | null; label: string; text: string; error: string } | null>(null);
+  /* null = 设置窗关着；数组里是正在编辑的整份列表 */
+  const [sheet, setSheet] = useState<BarDraft[] | null>(null);
+  const [error, setError] = useState('');
 
-  const open = (bar?: HomeBar) =>
-    setEdit(
-      bar
-        ? { id: bar.id, label: bar.label, text: bar.text, error: '' }
-        : { id: null, label: '', text: '', error: '' },
-    );
+  const openSheet = () => {
+    setError('');
+    setSheet(draftOf(props.bars));
+  };
 
-  const save = () => {
-    if (!edit) return;
+  const closeSheet = () => {
+    setSheet(null);
+    setError('');
+  };
+
+  const patchRow = (key: string, patch: Partial<BarDraft>) => {
+    setSheet((rows) => (rows ? rows.map((row) => (row.key === key ? { ...row, ...patch } : row)) : rows));
+    setError('');
+  };
+
+  const addRow = () => {
+    setSheet((rows) => {
+      if (!rows || rows.length >= MAX_HOME_BARS) return rows;
+      return [...rows, { key: newDraftKey(), id: null, label: '', text: '' }];
+    });
+    setError('');
+  };
+
+  const dropRow = (key: string) => {
+    setSheet((rows) => (rows ? rows.filter((row) => row.key !== key) : rows));
+    setError('');
+  };
+
+  const saveAll = () => {
+    if (!sheet) return;
     try {
-      const next = edit.id
-        ? updateHomeBar(props.bars, edit.id, { label: edit.label, text: edit.text })
-        : addHomeBar(props.bars, edit.text, edit.label);
+      /* 老栏按原顺序留下，再逐条套用改动；新栏接在后面 */
+      let next = props.bars.filter((bar) => sheet.some((row) => row.id === bar.id));
+      for (const row of sheet) {
+        const text = row.text.trim();
+        const label = row.label.trim();
+        /* 整行空着就当没加 */
+        if (!text && !label) continue;
+        if (!text) throw new Error('有一条还没写要发给 AI 的话');
+        next =
+          row.id && next.some((bar) => bar.id === row.id)
+            ? updateHomeBar(next, row.id, { label, text })
+            : addHomeBar(next, text, label);
+      }
       props.onChange(next);
-      setEdit(null);
+      closeSheet();
     } catch (e) {
-      setEdit({ ...edit, error: e instanceof Error ? e.message : String(e) });
+      setError(e instanceof Error ? e.message : String(e));
     }
   };
 
-  const remove = () => {
-    if (!edit?.id) return;
-    if (!window.confirm('删掉这条自定义栏？')) return;
-    props.onChange(removeHomeBar(props.bars, edit.id));
-    setEdit(null);
-  };
-
-  const editor = edit ? (
-    <div class="bar-editor">
-      <label>
-        <span>标题</span>
-        <input
-          value={edit.label}
-          maxLength={MAX_HOME_BAR_LABEL}
-          placeholder="比如「问空教室」"
-          onInput={(e) => setEdit({ ...edit, label: (e.target as HTMLInputElement).value, error: '' })}
-        />
-      </label>
-      <label>
-        <span>发给 AI 的文本</span>
-        <textarea
-          value={edit.text}
-          maxLength={MAX_HOME_BAR_TEXT}
-          rows={3}
-          placeholder="点这条栏会把这句填进 AI 输入框，比如「明天上午主校区有空教室吗」"
-          onInput={(e) => setEdit({ ...edit, text: (e.target as HTMLTextAreaElement).value, error: '' })}
-        />
-      </label>
-      {edit.error ? <p class="hint warn">{edit.error}</p> : null}
-      <div class="be-acts">
-        <button type="button" class="primary" onClick={save}>
-          保存
-        </button>
-        <button type="button" class="ghost" onClick={() => setEdit(null)}>
-          取消
-        </button>
-        {edit.id ? (
-          <button type="button" class="ghost bar-del" onClick={remove}>
-            删除
-          </button>
-        ) : null}
-      </div>
-    </div>
-  ) : null;
+  useEffect(() => {
+    if (!sheet) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') closeSheet();
+    };
+    /* 弹窗开着别让底下的页面跟着滚 */
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      document.body.style.overflow = prevOverflow;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sheet]);
 
   return (
     <section class="bars" aria-label="自定义栏">
+      <div class="bars-head">
+        <button type="button" class="bars-add" aria-label="管理自定义栏" onClick={openSheet}>
+          +
+        </button>
+      </div>
       {props.bars.map((bar) => (
-        <div class="bar-item" key={bar.id}>
-          <div class="bar-row">
-            <button
-              type="button"
-              class="bar"
-              onClick={() => props.onPick(bar.text)}
-              title={bar.text === bar.label ? undefined : bar.text}
-            >
-              <span class="bar-t">{bar.label}</span>
-              <span class="bar-s">{bar.text}</span>
-            </button>
-            <button type="button" class="bar-plus" aria-label={`编辑「${bar.label}」`} onClick={() => open(bar)}>
-              +
-            </button>
-          </div>
-          {edit?.id === bar.id ? editor : null}
-        </div>
+        <button
+          type="button"
+          class="bar"
+          key={bar.id}
+          onClick={() => props.onPick(bar.text)}
+          title={bar.text === bar.label ? undefined : bar.text}
+        >
+          <span class="bar-t">{bar.label}</span>
+          <span class="bar-s">{bar.text}</span>
+        </button>
       ))}
-      {props.bars.length < MAX_HOME_BARS ? (
-        <div class="bar-item">
-          <div class="bar-row">
-            <button type="button" class="bar ghost" onClick={() => open()}>
-              <span class="bar-t">添加自定义栏</span>
-              <span class="bar-s">标题 + 一句要发给 AI 的话</span>
-            </button>
-            <button type="button" class="bar-plus" aria-label="添加自定义栏" onClick={() => open()}>
-              +
-            </button>
-          </div>
-          {edit && edit.id === null ? editor : null}
-        </div>
+      {props.bars.length === 0 ? (
+        <p class="bars-empty">点右上角 + 加自定义栏，点栏就把话带进 AI 输入框。</p>
       ) : null}
+      {sheet
+        ? createPortal(
+            <div
+              class="bar-sheet"
+              onClick={(e) => {
+                if (e.target === e.currentTarget) closeSheet();
+              }}
+            >
+              <div class="bar-sheet-panel" role="dialog" aria-modal="true" aria-label="自定义栏设置">
+                <div class="bs-head">
+                  <strong>自定义栏</strong>
+                  <span class="bs-count">
+                    {sheet.length} / {MAX_HOME_BARS}
+                  </span>
+                </div>
+                <div class="bs-list">
+                  {sheet.map((row) => (
+                    <div class="bs-row" key={row.key}>
+                      <div class="bs-top">
+                        <input
+                          class="bs-label"
+                          value={row.label}
+                          maxLength={MAX_HOME_BAR_LABEL}
+                          placeholder="标题，留空就用正文开头"
+                          onInput={(e) => patchRow(row.key, { label: (e.target as HTMLInputElement).value })}
+                        />
+                        <button type="button" class="bs-del" aria-label="删掉这一条" onClick={() => dropRow(row.key)}>
+                          删除
+                        </button>
+                      </div>
+                      <textarea
+                        class="bs-text"
+                        value={row.text}
+                        rows={2}
+                        maxLength={MAX_HOME_BAR_TEXT}
+                        placeholder="点这条栏会把这句填进 AI 输入框"
+                        onInput={(e) => patchRow(row.key, { text: (e.target as HTMLTextAreaElement).value })}
+                      />
+                    </div>
+                  ))}
+                  {sheet.length === 0 ? <p class="bars-empty">还没有自定义栏，点下面「加一条」。</p> : null}
+                </div>
+                {error ? <p class="hint warn">{error}</p> : null}
+                <div class="bs-acts">
+                  <button type="button" class="ghost" onClick={addRow} disabled={sheet.length >= MAX_HOME_BARS}>
+                    加一条
+                  </button>
+                  <span class="bs-space" />
+                  <button type="button" class="ghost" onClick={closeSheet}>
+                    取消
+                  </button>
+                  <button type="button" class="primary" onClick={saveAll}>
+                    保存
+                  </button>
+                </div>
+              </div>
+            </div>,
+            document.body,
+          )
+        : null}
     </section>
   );
 }
