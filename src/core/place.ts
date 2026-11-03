@@ -41,6 +41,9 @@ const RULES: Rule[] = [
     prefixes: [...SOUTH_CORE_PREFIXES, '北1', '北2', '北3', '北4', '北5'],
     roomRe: SOUTH_CORE,
   },
+  // 学院/馆在系统里都缩成单字：护_101、材_301、物_505、化_202、数_103、环_401…
+  { re: /护理学院|护理|护院/, label: '护理学院', prefixes: ['护'] },
+  { re: /公共卫生学院|公卫/, label: '公共卫生学院', prefixes: ['公卫'] },
   { re: /物理馆|物馆/, label: '物理馆', prefixes: ['物'] },
   { re: /材料馆|材馆/, label: '材料馆', prefixes: ['材'] },
   { re: /化学馆|化馆/, label: '化学馆', prefixes: ['化'] },

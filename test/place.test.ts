@@ -42,6 +42,15 @@ describe('resolvePlace：口语地点 → 教室名前缀', () => {
     expect(resolvePlace('南3 第几节空着')?.prefixes).toEqual(['南3']);
   });
 
+  it('学院/馆在系统里是单字前缀：护理学院→护、公卫→公卫', () => {
+    expect(resolvePlace('护理学院')?.prefixes).toEqual(['护']);
+    expect(resolvePlace('护理学院')?.label).toBe('护理学院');
+    expect(resolvePlace('公共卫生学院')?.prefixes).toEqual(['公卫']);
+    expect(resolvePlace('材料馆')?.prefixes).toEqual(['材']);
+    expect(resolvePlace('物理馆')?.prefixes).toEqual(['物']);
+    expect(roomInPlace('护_101', resolvePlace('护理学院')!)).toBe(true);
+    expect(roomInPlace('材_301', resolvePlace('护理学院')!)).toBe(false);
+  });
   it('「南校区」不是楼号，别误判', () => {
     expect(resolvePlace('南校区的空教室')).toBeNull();
   });

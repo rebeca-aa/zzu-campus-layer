@@ -57,6 +57,8 @@ export function renderFreeRooms(
     breakdown?: string;
     /** 空结果时回显这次实际用的筛选条件，免得只能猜「为什么 0 间」。 */
     filters?: string;
+    /** 给了地点词却没认出来（如「护理学院」早期不在别名表里），明确告诉用户这是全校结果。 */
+    unknownPlace?: string;
     /** 限定地点前全校的空教室数，用来解释「为什么只剩这几间」。 */
     placeTotal?: number;
   },
@@ -79,6 +81,9 @@ export function renderFreeRooms(
   const limit = opts.maxRooms ?? 12;
   const rows = [
     `**${opts.date} 空教室${campus}${where}${opts.sectionLabel ? `（${opts.sectionLabel}）` : ''}**`,
+    ...(opts.unknownPlace
+      ? ['', `没认出「${opts.unknownPlace}」这个楼/区，下面是全校范围；可以说「南核」「北1」「物理馆」这种。`]
+      : []),
     '',
   ];
   for (const item of list.slice(0, limit)) {
