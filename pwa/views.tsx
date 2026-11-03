@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import type { Course, Term } from '../src/core/types';
-import { compressWeeks, currentWeekOf } from '../src/core/util';
+import { currentWeekOf } from '../src/core/util';
 import { ageText, readCache, writeCache } from '../src/core/offline';
 
 export type TabKey = 'home' | 'ai' | 'schedule' | 'mine';
@@ -77,14 +77,10 @@ export function TabBar({ tab, onTab }: { tab: TabKey; onTab: (t: TabKey) => void
 
 /* ---------------- 主页 ---------------- */
 
-type TileState = { text: string; tone?: 'ok' | 'warn' };
-
 /** 主页上次读到的东西，按天存一份，下次打开先铺出来再刷新 */
 interface HomeCache {
   courses: Course[];
   week: number | null;
-  tiles: Record<string, TileState>;
-  notice: { title: string; kind: string } | null;
   at: number;
 }
 
@@ -119,13 +115,8 @@ export function HomeView(props: {
   today: string;
   /** 20 点后首页翻到「明天」：标题、文案、课表都按明天来 */
   rolled: boolean;
-  /** 真正的今天：空教室等卡片仍按它查 */
-  realToday: string;
   call: Caller;
   refreshKey: number;
-  onOpen: (kind: 'library' | 'rooms' | 'card') => void;
-  onSchedule: () => void;
-  onNotice: () => void;
   onBell: () => void;
   unread: number;
   onRefresh: () => void;
@@ -133,17 +124,13 @@ export function HomeView(props: {
   /** 该问问卷时给一份文案和三个动作；不给就不显示 */
   survey?: { onFill: () => void; onLater: () => void; onNever: () => void } | null;
 }) {
-  const { today, call, refreshKey, realToday, rolled } = props;
+  const { today, call, refreshKey, rolled } = props;
   /* 上次打开时的结果：先铺出来，网络回来再覆盖，省得白屏等 */
   const cached = useMemo(() => readHomeCache(today), [today]);
   const [courses, setCourses] = useState<Course[] | null>(cached?.courses ?? null);
   const [week, setWeek] = useState<number | null>(cached?.week ?? null);
-  const [tiles, setTiles] = useState<Record<string, TileState>>(cached?.tiles ?? {});
-  const [notice, setNotice] = useState<{ title: string; kind: string } | null>(cached?.notice ?? null);
   const [err, setErr] = useState('');
   const [needLogin, setNeedLogin] = useState(false);
-  /* 点开哪一节课看详情 */
-  const [openLesson, setOpenLesson] = useState<string | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -165,60 +152,16 @@ export function HomeView(props: {
       }
     })();
 
-    /* 三个入口各自独立，谁先回来谁先更新 */
-    void (async () => {
-      const lib = await call('library_seats');
-      if (!alive) return;
-      if (authFail(lib)) setNeedLogin(true);
-      if (!lib.ok) {
-        setTiles((prev) => ({ ...prev, library: { text: '点开看' } }));
-        return;
-      }
-      const p = ((lib.data as any)?.data ?? lib.data) as { premises?: { name?: string; free?: number }[] } | undefined;
-      const first = p?.premises?.[0];
-      setTiles((prev) => ({
-        ...prev,
-        library: first
-          ? { text: `${shortName(first.name) ?? '图书馆'} 剩 ${first.free ?? 0}`, tone: (first.free ?? 0) > 0 ? 'ok' : 'warn' }
-          : { text: '查不到余量' },
-      }));
-    })();
-
-    void (async () => {
-      const rooms = await call('find_free_room', { date: realToday, limit: 5 });
-      if (!alive) return;
-      if (authFail(rooms)) setNeedLogin(true);
-      const n = rooms.ok ? Number(((rooms.data as any)?.data ?? rooms.data)?.count ?? 0) : -1;
-      setTiles((prev) => ({ ...prev, rooms: { text: n < 0 ? '点开看' : n > 0 ? `${n} 间空着` : '暂时没有' } }));
-    })();
-
-    void (async () => {
-      const card = await call('get_card');
-      if (!alive) return;
-      if (authFail(card)) setNeedLogin(true);
-      const bal = card.ok ? ((card.data as any)?.data ?? card.data)?.balance : undefined;
-      setTiles((prev) => ({ ...prev, card: { text: bal === undefined ? '看余额' : `¥ ${Number(bal).toFixed(2)}` } }));
-    })();
-
-    void (async () => {
-      const news = await call('find_notices', { limit: 1 });
-      if (!alive) return;
-      if (authFail(news)) setNeedLogin(true);
-      const list = ((news.data as any)?.data ?? news.data)?.cards as { title?: string; category?: string }[] | undefined;
-      const first = news.ok && Array.isArray(list) ? list[0] : undefined;
-      setNotice(first?.title ? { title: first.title, kind: kindLabel(first.category) } : null);
-    })();
-
     return () => {
       alive = false;
     };
-  }, [refreshKey, today, realToday, rolled]);
+  }, [refreshKey, today, rolled]);
 
   /* 拿到新课表就落一份缓存，下次打开先铺它 */
   useEffect(() => {
     if (courses === null) return;
-    writeHomeCache(today, { courses, week, tiles, notice, at: Date.now() });
-  }, [courses, week, tiles, notice, today]);
+    writeHomeCache(today, { courses, week, at: Date.now() });
+  }, [courses, week, today]);
 
   const nowMin = minutesOf(`${pad(new Date().getHours())}:${pad(new Date().getMinutes())}`);
   const list = courses ?? [];
@@ -241,10 +184,6 @@ export function HomeView(props: {
         })();
   /* 每门课一个固定颜色，跟「学期课表」那边同一套分配逻辑，但用更好区分的亮色 */
   const lessonColors = useMemo(() => assignColors(list, LESSON_COLORS), [list]);
-
-  const copyText = (text: string) => {
-    void navigator.clipboard?.writeText(text).catch(() => undefined);
-  };
 
   return (
     <>
@@ -306,14 +245,11 @@ export function HomeView(props: {
             {list.map((c) => {
               const done = !rolled && minutesOf(c.endTime) <= nowMin;
               const live = !rolled && !done && minutesOf(c.startTime) <= nowMin;
-              const open = openLesson === c.key;
               return (
-                <button
-                  class={`lesson${done ? ' done' : ''}${live ? ' now' : ''}${open ? ' open' : ''}`}
+                <div
+                  class={`lesson${done ? ' done' : ''}${live ? ' now' : ''}`}
                   key={c.key}
                   style={`--c:${lessonColors[c.name] ?? '#6a2f6d'}`}
-                  aria-expanded={open}
-                  onClick={() => setOpenLesson(open ? null : (c.key ?? null))}
                 >
                   <div class="time">
                     {c.startTime}
@@ -325,31 +261,8 @@ export function HomeView(props: {
                     <div class="meta">
                       {[c.location, c.teachers?.join('、')].filter(Boolean).join(' · ') || '地点待定'}
                     </div>
-                    {open && (
-                      <div class="lesson-more">
-                        <div>
-                          第{' '}
-                          {c.sectionStart && c.sectionStart !== c.sectionEnd
-                            ? `${c.sectionStart}-${c.sectionEnd}`
-                            : (c.sectionStart ?? '?')}{' '}
-                          节
-                        </div>
-                        {c.weeks?.length ? <div>周次：{compressWeeks(c.weeks)}</div> : <div>周次：每周</div>}
-                        {c.location && (
-                          <button
-                            class="link"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              copyText(c.location!);
-                            }}
-                          >
-                            复制地点
-                          </button>
-                        )}
-                      </div>
-                    )}
                   </div>
-                </button>
+                </div>
               );
             })}
           </div>
@@ -363,55 +276,8 @@ export function HomeView(props: {
                     ? '明天没课'
                     : '今天的课都上完了'}
             </span>
-            <button class="link" onClick={props.onSchedule}>
-              学期课表 ›
-            </button>
           </div>
         </section>
-
-        <div class="tiles">
-          <button class="tile tile-lib" onClick={() => props.onOpen('library')}>
-            <span class="art" aria-hidden="true">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M12 7c-1.6-1.3-3.7-2-6.2-2H4v12.5h1.8c2.5 0 4.6.7 6.2 2 1.6-1.3 3.7-2 6.2-2H20V5h-1.8C15.7 5 13.6 5.7 12 7z" />
-                <path d="M12 7v12.5" />
-              </svg>
-            </span>
-            <div class="t">图书馆</div>
-            <div class={`s ${tiles.library?.tone ?? ''}`}>
-              {needLogin ? '登录后看' : tiles.library?.text ?? '…'}
-            </div>
-          </button>
-          <button class="tile tile-room" onClick={() => props.onOpen('rooms')}>
-            <span class="art" aria-hidden="true">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
-                <rect x="3.5" y="4.5" width="17" height="15" rx="2.5" />
-                <path d="M3.5 9.5h17" />
-                <path d="M8.5 4.5v5M15.5 4.5v5" />
-                <path d="M8 14h3M8 16.5h6" />
-              </svg>
-            </span>
-            <div class="t">空教室</div>
-            <div class={`s ${tiles.rooms?.tone ?? ''}`}>{needLogin ? '登录后看' : tiles.rooms?.text ?? '…'}</div>
-          </button>
-          <button class="tile tile-card" onClick={() => props.onOpen('card')}>
-            <span class="art" aria-hidden="true">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
-                <rect x="3" y="6" width="18" height="12.5" rx="2.6" />
-                <path d="M3 10.5h18" />
-                <path d="M6.5 15h3.5" />
-              </svg>
-            </span>
-            <div class="t">校园卡</div>
-            <div class="s">{needLogin ? '登录后看' : tiles.card?.text ?? '…'}</div>
-          </button>
-        </div>
-
-        <button class={`notice-line${notice ? '' : ' empty'}`} onClick={props.onNotice}>
-          <span class="kind">{notice ? notice.kind : '通知'}</span>
-          <span class="nt">{notice ? notice.title : '暂无新通知'}</span>
-          <span class="more">›</span>
-        </button>
 
         {props.survey && (
           <section class="survey-ask">
@@ -441,25 +307,6 @@ export function HomeView(props: {
 function shortName(name?: string): string {
   if (!name) return '';
   return name.replace(/^主校区/, '').replace(/图书馆$/, '') || name;
-}
-
-function kindLabel(cat?: string): string {
-  switch (cat) {
-    case 'lecture':
-      return '讲座';
-    case 'competition':
-      return '比赛';
-    case 'activity':
-      return '活动';
-    case 'meeting':
-      return '会议';
-    case 'academic':
-      return '教务';
-    case 'life':
-      return '生活';
-    default:
-      return '通知';
-  }
 }
 
 /* ---------------- 学期课表 ---------------- */

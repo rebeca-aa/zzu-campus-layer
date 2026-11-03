@@ -1165,37 +1165,11 @@ const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
           <HomeView
             today={homeDay.date}
             rolled={homeDay.rolled}
-            realToday={today}
             call={call}
             refreshKey={homeRefresh}
             busy={homeBusy}
             unread={unread}
-            onOpen={(kind) => {
-              /* 没登录就先让用户登录，别问一句再被回「还没 token」 */
-              if (!jwxt?.valid) {
-                setNavDir('fwd');
-                openLogin();
-                return;
-              }
-              if (kind === 'library') {
-                setNavDir('fwd');
-                goTab('ai');
-                void submit('图书馆还有位置吗');
-                return;
-              }
-              if (kind === 'rooms') {
-                setNavDir('fwd');
-                goTab('ai');
-                void submit('今天的空教室');
-                return;
-              }
-              setNavDir('fwd');
-              goTab('ai');
-              void submit('我卡里还有多少钱');
-            }}
-            onSchedule={() => goTab('schedule')}
             onBell={openNotices}
-            onNotice={openNotices}
             onRefresh={refreshHome}
             {...(surveyAsk
               ? {
