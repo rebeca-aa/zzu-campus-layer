@@ -1212,9 +1212,9 @@ const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
               b.loginLibrary();
               return;
             }
-            /* 没有原生通道时别去开那个网页：那个站登录页在 App 里走不通（点了也登不上），
-               只能老实告诉用户去电脑上的扩展里登一次，登录态会同步过来。 */
-            window.alert('这台设备上没有原生登录通道，直接开网页登录用不了。\n请在电脑上装浏览器扩展，从扩展里的「图书馆登录」登录一次；登录态会同步到这个页面。');
+            /* 不给网页留路：那个站的网页登录在 App 里走不通，浏览器 / iOS 也一律不打算支持，
+               只在安卓壳（有原生通道）里做这件事。 */
+            window.alert('图书馆登录要在安卓 App 里进行：当前环境没有登录通道，请改用安卓 App。');
           }}
           onRenew={() => void doRenew()}
           onToggleClass={(v) => void toggleClass(v)}
