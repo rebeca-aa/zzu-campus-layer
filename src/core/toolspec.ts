@@ -107,12 +107,17 @@ export const TOOL_SPECS: ToolSpec[] = [
             type: 'string',
             description: '日期 YYYY-MM-DD。**用户说今天/明天/后天时不要填这个字段**，交给服务端按相对日期算，模型自己算日期不可靠。',
           },
-          campus: { type: 'string', description: '校区，例如 主校区 / 南校区 / 北校区' },
+          campus: {
+            type: 'string',
+            description:
+              '校区，例如 主校区 / 南校区 / 北校区。只有用户明确说「哪个校区」时才填；' +
+              '用户说的是楼/教学区（南核、北1、物理馆）就填 building，不要填 campus——「南核」不是校区。',
+          },
           building: {
             type: 'string',
             description:
-              '地点原词，按教室名前缀过滤：南核 / 北核 / 核心教学区 / 北1 / 南2 / 物理馆 / 材料馆 / 化学馆 / 图书馆。' +
-              '用户提到具体楼或教学区时，原样填他说的词。',
+              '地点原词，按教室名前缀过滤：南核（=南1–南5）/ 北核 / 核心教学区 / 北1 / 南2 / 物理馆 / 材料馆 / 化学馆 / 图书馆。' +
+              '用户提到具体楼或教学区时，原样填他说的词；这一项和 campus 不要同时填。',
           },
           minSeats: { type: 'integer', minimum: 0, description: '最少座位数（多数教室没有座位数据，筛完可能变少）' },
           sections: {

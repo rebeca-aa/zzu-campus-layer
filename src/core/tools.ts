@@ -181,8 +181,13 @@ export const findFreeRoom: ToolDefinition<{
   }),
   async run(args, svc) {
     const date = args.date ?? todayShanghai();
+    // 地点词先解析：南核/北1 这种前缀本身就只存在于一个校区里。
+    // 真机踩过的坑：LLM 听到「南核」会顺手补一个 campus:'南校区'，
+    // 服务端先按南校区取教室，再按南1–5 前缀筛，结果必然是 0 间，
+    // 还会把「那一片有 50 间空教室」当解释甩出来。所以两者同时给时，地点词说了算。
+    const place = args.building ? resolvePlace(args.building) : null;
     let campusId: string | undefined;
-    if (args.campus) {
+    if (args.campus && !place) {
       const campuses = await svc.campuses();
       const hit = campuses.find((c) => c.name.includes(args.campus!) || c.id === args.campus);
       if (!hit) throw new Error(`没找到校区「${args.campus}」，可用：${campuses.map((c) => c.name).join('、')}`);
@@ -199,7 +204,6 @@ export const findFreeRoom: ToolDefinition<{
     });
     // 地点词（南核/北1/物理馆）按教室名前缀过滤。
     // 不做服务端 buildingIds：那套 id 不透明、跨学期会变，名字前缀才是学生嘴里的那个东西。
-    const place = args.building ? resolvePlace(args.building) : null;
     const scoped = place ? rooms.filter((r) => roomInPlace(r.room.name, place)) : rooms;
     const label = args.sections?.length ? `第 ${args.sections.join('/')} 节` : '';
     return {
