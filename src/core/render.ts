@@ -270,7 +270,7 @@ export function renderLibrarySeats(s: LibrarySeats): string {
   if (totalAll > 0) rows.push('', `合计空闲 **${totalFree}** / ${totalAll}。`);
   rows.push(
     '',
-    '要看**具体哪个座位号空着**就说「一楼大厅哪些座位空着」，我会去读座位图（需要你在浏览器里已登录那个页面）。',
+    '要看**具体哪个座位号空着**就说「一楼大厅哪些座位空着」，我会去读座位图（需要先在「我的 → 图书馆登录」登录一次）。',
     '要下单就说「订 001，明天」——我会给你一个**长按 1.2 秒**的确认按钮，长按才提交，误触不会下单。',
   );
   return rows.join('\n');

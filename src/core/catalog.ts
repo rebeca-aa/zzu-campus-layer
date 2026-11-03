@@ -1,6 +1,7 @@
 /**
  * 门户（豫见郑大）的服务目录：来自 /v2/service/serviceShowAll 与 /v1/service/list 的实测结果。
- * 用途：一句话直达——「打开座位预约」直接给链接，不用在 App 里翻。
+ * 用途：一句话直达——「打开办事大厅」直接给链接，不用在 App 里翻。
+ * 例外：座位预约标了 noLink，那个站网页登录在 App 里走不通，改指「我的 → 图书馆登录」。
  */
 export interface PortalService {
   name: string;
@@ -13,6 +14,11 @@ export interface PortalService {
   aliases?: string[];
   /** 是否只能在校内网 / 需要 VPN */
   campusOnly?: boolean;
+  /**
+   * 不给入口链接：这个站的网页登录在 App 里走不通（点了也登不上），
+   * 统一改成去「我的 → 图书馆登录」，AI 那边也不许甩链接。
+   */
+  noLink?: boolean;
 }
 
 export const PORTAL_SERVICES: PortalService[] = [
@@ -22,6 +28,7 @@ export const PORTAL_SERVICES: PortalService[] = [
     url: 'http://order.lib.zzu.edu.cn/h5/index.html#/seat/index',
     group: '图书馆',
     what: '图书馆座位/自习位预约',
+    noLink: true,
     aliases: ['自习', '占座', '抢座', '图书馆座位', '自习室', '预约座位', '预约位置', '图书馆位置', '图书馆一楼', '订座', '找个位置'],
   },
   {

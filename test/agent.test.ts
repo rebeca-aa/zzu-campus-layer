@@ -55,7 +55,9 @@ describe('agent 循环（支持 function calling 的模型）', () => {
     expect(got.via).toBe('agent');
     expect(got.steps).toEqual(['open_service']);
     expect(got.text).toContain('入口');
-    expect(got.data?.url).toBe('http://order.lib.zzu.edu.cn/h5/index.html#/seat/index');
+    /* 座位预约不再给链接：那个站的网页登录在 App 里走不通，只指去「我的 → 图书馆登录」 */
+    expect(got.data?.url).toBeUndefined();
+    expect(got.data?.noLink).toBe(true);
 
     // 第一次请求要带工具规格，第二次要把工具结果回灌
     expect(Array.isArray(bodies[0]?.tools)).toBe(true);

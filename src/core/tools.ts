@@ -4,7 +4,7 @@ import { PORTAL_SERVICES, matchServices } from './catalog';
 import { coursesToIcs } from './ics';
 import { resolvePlace, roomInPlace } from './place';
 import { planStudy, renderStudyPlan } from './study';
-import { librarySeatUrl, pickRoom, resolveLibraryDate, seatMapDataUri, areaIdByName, FLOOR_AREA_ID, FLOOR_AREA_ALTS, areaNameOf, floorOfArea } from './library';
+import { pickRoom, resolveLibraryDate, seatMapDataUri, areaIdByName, FLOOR_AREA_ID, FLOOR_AREA_ALTS, areaNameOf, floorOfArea } from './library';
 import { renderCard, renderCourseTable, renderFreeRooms, renderGrades, renderLibrarySeats, renderPlanProgress, renderSeatMap, renderTodos } from './render';
 import { readLibrarySeats } from './libtab';
 import { addDays, dateOfWeek, todayShanghai, weekOfDate, weekdayOf } from './util';
@@ -398,7 +398,8 @@ export const getPlanProgress: ToolDefinition<{ code?: string }> = {
 
 export const openService: ToolDefinition<{ keyword: string }> = {
   name: 'open_service',
-  description: '把门户里的服务直接打开：给关键词（座位预约/报修/食堂/奖学金…），返回入口链接。',
+  description:
+    '把门户里的服务直接打开：给关键词（报修/食堂/奖学金…），返回入口链接。座位预约例外——那个站网页登录走不通，不给链接，只提示去「我的 → 图书馆登录」。',
   schema: z.object({ keyword: z.string().min(1) }),
   async run(args) {
     const hits = matchServices(args.keyword, 3);
@@ -409,6 +410,10 @@ export const openService: ToolDefinition<{ keyword: string }> = {
     const best = hits[0]!;
     const rows = [`**${best.service.name}**`, '', best.service.what];
     if (best.service.campusOnly) rows.push('', '_仅校内网 / VPN 可用_');
+    /* 有的站登录页在 App 里走不通：不给链接，改指设置面板，免得点进去白忙一场 */
+    if (best.service.noLink) {
+      rows.push('', '这个入口的网页登录用不了：请到「我的 → 图书馆登录」用学校账号登录，回来再试。');
+    }
     // 链接交给面板渲染成按钮（data.url），正文不重复贴一遍裸 URL
     if (hits.length > 1) {
       rows.push('', '其他可能相关的：');
@@ -419,7 +424,7 @@ export const openService: ToolDefinition<{ keyword: string }> = {
       data: {
         matched: hits.length,
         name: best.service.name,
-        url: best.service.url,
+        ...(best.service.noLink ? { noLink: true } : { url: best.service.url }),
         what: best.service.what,
       },
     };
@@ -492,8 +497,7 @@ export const librarySeatTool: ToolDefinition<{ date?: string }> = {
         premises: seats.premises,
         free: seats.premises.reduce((n, p) => n + p.free, 0),
         total: seats.premises.reduce((n, p) => n + p.total, 0),
-        url: seats.url,
-        name: '图书馆座位预约',
+        name: '图书馆座位',
       },
     };
   },
@@ -507,7 +511,7 @@ export const librarySeatMapTool: ToolDefinition<{
 }> = {
   name: 'library_seat_map',
   description:
-    '读图书馆某个区域某天的**座位级**数据（哪个座位号空着）。需要用户已经在浏览器里登录 order.lib.zzu.edu.cn。用户问“一楼大厅还有哪些座位”“二楼有哪些房间”“三楼自习室 A 区还有位置吗”“靠窗还有位置吗”“订 001”时先调这个确认。二层以上一层里有多间房：只给楼层会把每间都画出来，给了 room 就只画那一间。',
+    '读图书馆某个区域某天的**座位级**数据（哪个座位号空着）。需要用户先在「我的 → 图书馆登录」登录（别让他点网页链接，那个登录用不了，也不要输出网址）。用户问“一楼大厅还有哪些座位”“二楼有哪些房间”“三楼自习室 A 区还有位置吗”“靠窗还有位置吗”“订 001”时先调这个确认。二层以上一层里有多间房：只给楼层会把每间都画出来，给了 room 就只画那一间。',
   schema: z.object({
     floor: z.enum(FLOOR_NAMES).optional(),
     room: z.string().min(1).optional(),
@@ -559,11 +563,17 @@ export const librarySeatMapTool: ToolDefinition<{
 
     const res = await readLibrarySeats({ areaId: area, date: args.date });
     if (!res.ok || !res.data) {
-      const openUrl = librarySeatUrl(area, args.date);
-        return {
-          text: res.error ?? '读不到座位图。',
-          data: { error: true, url: openUrl, name: '座位预约', args },
-        };
+      /* 这里**不给链接**：那个站的网页登录在 App 里走不通，点进去也登不上。
+         统一让用户去「我的 → 图书馆登录」，AI 也照这个说。
+         错误文案里可能已经带了这句引导，那就别重复第二遍。 */
+      const why = res.error ?? '读不到座位图。';
+      const hint = why.includes('我的 → 图书馆登录')
+        ? ''
+        : '\n\n登录入口在「我的 → 图书馆登录」：用学号 + 图书馆密码登一次，回来再说一次就行（别从网页链接进，那个登录用不了）。';
+      return {
+        text: `${why}${hint}`,
+        data: { error: true, args },
+      };
     }
     if (!res.data.seats.length) {
       const raw = JSON.stringify(res.data.raw ?? res.data).slice(0, 900);

@@ -88,7 +88,6 @@ const CAS_LOGIN =
   // 而静态文件不会启动那个 uni-app SPA —— SPA 一启动就会把 ?ticket= 从地址栏抹掉。
   encodeURIComponent('https://uniapp.s.zzu.edu.cn/static/index.a5c69d49.css');
 /* 门户的登录入口：同一个 CAS，只是 service 换成门户首页；拿到的票在门户/教务两边都能用。 */
-const LIB_LOGIN = 'http://order.lib.zzu.edu.cn/h5/index.html#/seat/index';
 const CAS_LOGIN_PORTAL =
   'https://cas.s.zzu.edu.cn/cas/login?service=' +
   encodeURIComponent('https://uniapp.s.zzu.edu.cn/pages/tab/index/index');
@@ -1209,8 +1208,13 @@ const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
           }}
           onLibraryLogin={() => {
             const b = (window as unknown as { CampusNotify?: { loginLibrary?: () => void } }).CampusNotify;
-            if (b?.loginLibrary) b.loginLibrary();
-            else window.open(LIB_LOGIN, '_blank', 'noreferrer');
+            if (b?.loginLibrary) {
+              b.loginLibrary();
+              return;
+            }
+            /* 没有原生通道时别去开那个网页：那个站登录页在 App 里走不通（点了也登不上），
+               只能老实告诉用户去电脑上的扩展里登一次，登录态会同步过来。 */
+            window.alert('这台设备上没有原生登录通道，直接开网页登录用不了。\n请在电脑上装浏览器扩展，从扩展里的「图书馆登录」登录一次；登录态会同步到这个页面。');
           }}
           onRenew={() => void doRenew()}
           onToggleClass={(v) => void toggleClass(v)}

@@ -213,22 +213,21 @@ export async function readLibrarySeats(args: {
   if (bridgeErr) console.warn('[lib] 桥试过', triedIds.join('、'), bridgeErr);
   const cn = typeof window === 'undefined' ? undefined : (window as any).CampusNotify;
   const bridgeInfo =
-    '[诊断 ' +
-    (typeof __APP_VERSION__ === 'string' ? 'v' + __APP_VERSION__ : 'v?') +
+    '[lib] 诊断 v' +
+    (typeof __APP_VERSION__ === 'string' ? __APP_VERSION__ : '?') +
     ' · 壳桥' + (cn ? '有' : '无') +
     ' · 方法' + (cn ? '(' + Object.keys(cn).join(',') + ')' : '-') +
-    ' · libSeats' + (cn && typeof cn.libSeats === 'function' ? '✓' : '✗') +
-    ']';
+    ' · libSeats' + (cn && typeof cn.libSeats === 'function' ? '✓' : '✗');
 
   const tab = await findLibraryTab();
   if (!tab?.id) {
-    const tip = bridgeInfo;
+    /* 诊断信息只写控制台，别塞进给用户看的回复里（以前那行「[诊断 …]」会原样出现在 AI 气泡里） */
+    console.warn(bridgeInfo, bridgeErr ? '桥返回：' + bridgeErr : '桥不可用');
     return {
       ok: false,
       error:
-        tip +
-        (bridgeErr ? '\n[原生桥最后一次返回] ' + bridgeErr : '\n[原生桥] 没有尝试（桥不可用）') +
-        '\n图书馆座位图要用那个站自己的登录态，我这边拿不到。三步就能解决：\n1. 点下面「打开座位预约」进那个网站并登录（学校账号）\n2. 登录后回到这里，再说一次「一楼座位图」\n3. 如果你是在手机上（没有装浏览器扩展），那个页面请用系统浏览器打开登录，回来我仍然读不到——手机上只能看馆级余量，座位号需要电脑上的扩展。',
+        '图书馆座位图要用那个站自己的登录态，我这边拿不到。在「我的 → 图书馆登录」用学校账号（学号 + 图书馆密码）登一次，回来再说一次「一楼座位图」。\n' +
+        '手机上只能看馆级余量；座位号需要电脑上的扩展。',
     };
   }
 
