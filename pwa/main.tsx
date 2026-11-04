@@ -1241,6 +1241,7 @@ const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
       {tab === 'schedule' && (
         <div class="page-live" key="schedule">
           <ScheduleView
+            theme={theme}
             call={call}
             term={term}
             today={today}

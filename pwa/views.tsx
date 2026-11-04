@@ -624,6 +624,78 @@ const COLORS = [
   '#2f4238',
 ];
 
+/** #rrggbb → [r,g,b] */
+function hexRgb(hex: string): [number, number, number] {
+  const m = /^#?([\da-f]{6})$/i.exec(hex.trim());
+  const n = m ? parseInt(m[1]!, 16) : 0;
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
+
+/** 相对亮度（WCAG） */
+function luminance(hex: string): number {
+  const [r, g, b] = hexRgb(hex).map((v) => {
+    const c = v / 255;
+    return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+  }) as [number, number, number];
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+
+/** a 里掺 weight 比例的 b */
+function mixHex(a: string, b: string, weight: number): string {
+  const [ar, ag, ab] = hexRgb(a);
+  const [br, bg, bb] = hexRgb(b);
+  const to = (x: number, y: number) => Math.round(x * (1 - weight) + y * weight);
+  return `#${[to(ar, br), to(ag, bg), to(ab, bb)].map((v) => v.toString(16).padStart(2, '0')).join('')}`;
+}
+
+/** #rrggbb → [h(0-360), s(0-1), l(0-1)] */
+function rgbToHsl(hex: string): [number, number, number] {
+  const [r0, g0, b0] = hexRgb(hex).map((v) => v / 255) as [number, number, number];
+  const max = Math.max(r0, g0, b0);
+  const min = Math.min(r0, g0, b0);
+  const l = (max + min) / 2;
+  if (max === min) return [0, 0, l];
+  const d = max - min;
+  const s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+  let h = 0;
+  if (max === r0) h = (g0 - b0) / d + (g0 < b0 ? 6 : 0);
+  else if (max === g0) h = (b0 - r0) / d + 2;
+  else h = (r0 - g0) / d + 4;
+  return [h * 60, s, l];
+}
+
+function hslToHex(h: number, s: number, l: number): string {
+  const c = (1 - Math.abs(2 * l - 1)) * s;
+  const x = c * (1 - Math.abs(((h / 60) % 2) - 1));
+  const m = l - c / 2;
+  let rgb: [number, number, number];
+  if (h < 60) rgb = [c, x, 0];
+  else if (h < 120) rgb = [x, c, 0];
+  else if (h < 180) rgb = [0, c, x];
+  else if (h < 240) rgb = [0, x, c];
+  else if (h < 300) rgb = [x, 0, c];
+  else rgb = [c, 0, x];
+  return `#${rgb.map((v) => Math.round((v + m) * 255).toString(16).padStart(2, '0')).join('')}`;
+}
+
+/**
+ * 课表色块按主题调：米白主题用浅色块 + 深字，深色主题保持深色块 + 浅字；
+ * 最后按背景亮度选字色，保证对比度（小字号也看得清）。
+ */
+function coursePaint(base: string, theme: string): { bg: string; ink: string } {
+  let bg: string;
+  if (theme === 'cream') {
+    /* 保留色相、提亮降饱和，做成能分辨的浅色块，而不是混成一片灰 */
+    const [h, s] = rgbToHsl(base);
+    bg = hslToHex(h, Math.min(0.6, Math.max(0.4, s * 1.8)), 0.83);
+  } else {
+    /* 深色主题：往主题底色靠一点，别和背景打架 */
+    bg = mixHex(base, theme === 'teal' ? '#07191a' : '#0b1220', 0.12);
+  }
+  const ink = luminance(bg) > 0.45 ? '#14202e' : '#f3f5f9';
+  return { bg, ink };
+}
+
 function colorOf(name: string): string {
   /* FNV-1a：比 h*31 散得开，几门课的色块不会挤在同一两个颜色上 */
   let h = 0x811c9dc5;
@@ -708,6 +780,8 @@ export function ScheduleView(props: {
   term: Term | null;
   today: string;
   refreshKey: number;
+  /** 当前配色：色块的深浅跟着主题走 */
+  theme: string;
   /** 回主页：底部已经没有课表入口，靠这个返回 */
   onBack: () => void;
 }) {
@@ -730,6 +804,12 @@ export function ScheduleView(props: {
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState('');
   const colorMap = useMemo(() => assignColors(courses), [courses]);
+  /* 每门课的色块：浅/深跟着主题，字色按亮度选，保证对比度 */
+  const paintOf = useMemo(() => {
+    const map: Record<string, { bg: string; ink: string }> = {};
+    for (const c of courses) map[c.name] = coursePaint(colorMap[c.name] ?? colorOf(c.name), props.theme);
+    return map;
+  }, [courses, colorMap, props.theme]);
 
   /* 左右滑换周：拖动时跟手，松手超过 56px 就换周，否则弹回 */
   const [dragX, setDragX] = useState(0);
@@ -902,7 +982,9 @@ export function ScheduleView(props: {
               <div
                 class="course"
                 key={c.key}
-                style={`grid-column:${c.weekday + 1};grid-row:${row + 1} / span ${span};background:${colorMap[c.name] ?? colorOf(c.name)}`}
+                style={`grid-column:${c.weekday + 1};grid-row:${row + 1} / span ${span};background:${
+                  paintOf[c.name]?.bg ?? coursePaint(colorOf(c.name), props.theme).bg
+                };color:${paintOf[c.name]?.ink ?? coursePaint(colorOf(c.name), props.theme).ink}`}
                 title={`${c.name} ${c.location ?? ''}`}
               >
                 {c.name.startsWith('实验') && <span class="tag">实验</span>}
