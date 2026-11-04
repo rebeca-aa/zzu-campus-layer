@@ -754,6 +754,8 @@ export function ScheduleView(props: {
 
   const [at, setAt] = useState<number | null>(null);
   const [tick, setTick] = useState(0);
+  /* 学期信息没拿到时，先问一次「本周」（不带 week），用工具算出来的周次兜底 */
+  const weekSynced = useRef(false);
 
   useEffect(() => {
     let alive = true;
@@ -765,11 +767,21 @@ export function ScheduleView(props: {
       if (alive && cached) setCourses(cached.data);
     })();
     void (async () => {
-      const res = await call('get_schedule', { week });
+      const askCurrent = !term && !weekSynced.current;
+      const res = await call('get_schedule', askCurrent ? {} : { week });
       if (!alive) return;
       if (res.ok) {
         const payload = (res.data as any)?.data ?? res.data;
         const list = Array.isArray(payload?.courses) ? payload.courses : [];
+        /* 服务端/工具算出的当前周：界面周次跟着它走，别停在默认的第 1 周 */
+        if (askCurrent && typeof payload?.week === 'number' && payload.week > 0) {
+          weekSynced.current = true;
+          if (payload.week !== week) {
+            setWeek(payload.week);
+            setLoading(false);
+            return;
+          }
+        }
         setCourses(list);
         setAt(Date.now());
         void writeCache('schedule', list);
@@ -789,7 +801,7 @@ export function ScheduleView(props: {
     return () => {
       alive = false;
     };
-  }, [week, props.refreshKey, tick]);
+  }, [week, props.refreshKey, tick, term]);
 
   const monday = mondayOf(today, week - currentWeek);
   const dayDates = Array.from({ length: 7 }, (_, i) => addDays(monday, i));

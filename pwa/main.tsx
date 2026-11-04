@@ -50,7 +50,7 @@ import {
   surveyUrl,
   type SurveyState,
 } from '../src/core/survey';
-import { displayDayShanghai, msUntilMidnightShanghai, msUntilRollover, todayShanghai } from '../src/core/util';
+import { displayDayShanghai, msUntilMidnightShanghai, msUntilRollover, todayShanghai, weekOfDate } from '../src/core/util';
 import type { Term } from '../src/core/types';
 import { NoticeBoard } from '../src/ui/notice';
 import { HomeView, HueLine, LineSlider, MineView, ScheduleView, TabBar, type Caller, type TabKey } from './views';
@@ -95,6 +95,36 @@ const CAS_LOGIN_PORTAL =
 /* 常用语改成可编辑列表（原来写死在 QUICK 里）：存 kv，改动立刻落盘。
    初始值先用出厂的，等 refresh() 读到用户自己的列表再替换，避免闪一下空条。 */
 
+const TERM_CACHE_KEY = 'campus-layer:termCache';
+
+/** 学期信息落一份本地缓存：接口抖一下也不至于把课表页打回「第 1 周」。 */
+function readCachedTerm(): Term | null {
+  try {
+    const raw = localStorage.getItem(TERM_CACHE_KEY);
+    if (!raw) return null;
+    const o = JSON.parse(raw) as Partial<Term>;
+    if (!o || typeof o.startDate !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(o.startDate)) return null;
+    return {
+      id: String(o.id ?? ''),
+      code: String(o.code ?? ''),
+      startDate: o.startDate,
+      endDate: String(o.endDate ?? ''),
+      weeks: Array.isArray(o.weeks) ? o.weeks : [],
+      ...(typeof o.currentWeek === 'number' ? { currentWeek: o.currentWeek } : {}),
+    } as Term;
+  } catch {
+    return null;
+  }
+}
+
+function writeCachedTerm(t: Term): void {
+  try {
+    localStorage.setItem(TERM_CACHE_KEY, JSON.stringify(t));
+  } catch {
+    /* 存不下也不影响用 */
+  }
+}
+
 function pushNote(text: string) {
   window.dispatchEvent(new CustomEvent("campus-note", { detail: text }));
 }
@@ -129,7 +159,12 @@ function App() {
   const [tab, setTab] = useState<TabKey>('home');
   /* 我的下面的二级页 */
   const [sub, setSub] = useState<'none' | 'theme' | 'settings' | 'about' | 'survey'>('none');
-  const [term, setTerm] = useState<Term | null>(null);
+  const [term, setTerm] = useState<Term | null>(() => {
+    const cached = readCachedTerm();
+    if (!cached) return null;
+    const w = weekOfDate(cached.startDate, todayShanghai());
+    return { ...cached, ...(w > 0 ? { currentWeek: w } : {}) };
+  });
   /* 每次进课表页都重拉一次学期信息（周次可能是好几天前拉的） */
   const [termTick, setTermTick] = useState(0);
   const [homeRefresh, setHomeRefresh] = useState(0);
@@ -924,7 +959,10 @@ const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
         const session = await loadSession();
         if (!session.jwxtToken && !session.portalToken) return;
         const t = await new CampusService(session).term();
-        if (alive) setTerm(t);
+        if (alive) {
+          setTerm(t);
+          writeCachedTerm(t);
+        }
       } catch {
         /* 没登录 / 断网就先不显示周次 */
       }
