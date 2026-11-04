@@ -60,8 +60,17 @@ describe('杂项', () => {
 describe('现在是第几周', () => {
   const TERM = { startDate: '2026-09-07' };
 
-  it('服务端给了 currentWeek 就用它', () => {
+  it('服务端 currentWeek 和开学日期一致时结果一样', () => {
     expect(currentWeekOf({ ...TERM, currentWeek: 8 }, '2026-10-31')).toBe(8);
+  });
+
+  it('服务端给了周次就信它（学校口径可能和按日期推算不同）', () => {
+    expect(currentWeekOf({ startDate: '2026-09-07', currentWeek: 1 }, '2026-11-04')).toBe(1);
+    expect(currentWeekOf({ startDate: '2026-09-07', currentWeek: 8 }, '2026-11-04')).toBe(8);
+  });
+
+  it('没有 startDate 时才用服务端 currentWeek', () => {
+    expect(currentWeekOf({ currentWeek: 7 }, '2026-11-04')).toBe(7);
   });
 
   it('没给 currentWeek 就按首周周一推（不会一直停在第 1 周）', () => {

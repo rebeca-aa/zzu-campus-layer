@@ -58,6 +58,8 @@ export function currentWeekOf(
   term: { currentWeek?: number; startDate?: string } | null | undefined,
   today: string,
 ): number {
+  /* 服务端的教学周是学校口径（可能跳过放假周），优先信它；
+     没有 startDate 或接口没给时，才用「首周周一 + 今天」兜底。 */
   if (term?.currentWeek && term.currentWeek > 0) return term.currentWeek;
   if (term?.startDate) {
     const w = weekOfDate(term.startDate, today);

@@ -130,6 +130,8 @@ function App() {
   /* 我的下面的二级页 */
   const [sub, setSub] = useState<'none' | 'theme' | 'settings' | 'about' | 'survey'>('none');
   const [term, setTerm] = useState<Term | null>(null);
+  /* 每次进课表页都重拉一次学期信息（周次可能是好几天前拉的） */
+  const [termTick, setTermTick] = useState(0);
   const [homeRefresh, setHomeRefresh] = useState(0);
   const [homeBusy, setHomeBusy] = useState(false);
   /* 新版本已就绪（等用户点「立即更新」）与「刚更新完」的公告 */
@@ -284,7 +286,20 @@ const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
   const [noticePrefs, setNoticePrefsState] = useState<NoticePrefs>(DEFAULT_NOTICE_PREFS);
   /* 主页课表下面的自定义栏（长条 + 右侧「+」），存 homeBars */
   const [homeBars, setHomeBars] = useState<HomeBar[]>([]);
-  const [today] = useState(todayShanghai());
+  const [today, setToday] = useState(todayShanghai());
+  /* 壳里的 WebView 会活好几天：跨过午夜要自己把「今天」翻过去，
+     否则课表页还用昨天的日期算周次和星期几 */
+  useEffect(() => {
+    const sync = () => setToday(todayShanghai());
+    const id = window.setInterval(sync, 60_000);
+    document.addEventListener('visibilitychange', sync);
+    window.addEventListener('focus', sync);
+    return () => {
+      window.clearInterval(id);
+      document.removeEventListener('visibilitychange', sync);
+      window.removeEventListener('focus', sync);
+    };
+  }, []);
   /* 首页课表：20 点后自动显示「明天」的那张，过点后定时翻页 */
   const [homeDay, setHomeDay] = useState(() => displayDayShanghai());
   useEffect(() => {
@@ -894,7 +909,14 @@ const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
     }
   }, []);
 
-  /* 学期信息：总周数、当前第几周 */
+  /* 切到课表页：把「今天」和学期周次都重新对一次 */
+  useEffect(() => {
+    if (tab !== 'schedule') return;
+    setToday(todayShanghai());
+    setTermTick((n) => n + 1);
+  }, [tab]);
+
+  /* 学期信息：总周数、当前第几周（跨天/切回前台会跟着 today 重拉一次） */
   useEffect(() => {
     let alive = true;
     void (async () => {
@@ -910,7 +932,7 @@ const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
     return () => {
       alive = false;
     };
-  }, [homeRefresh]);
+  }, [homeRefresh, today, termTick]);
 
   /* 主页那个刷新：重拉今天的课、图书馆余量、空教室、余额、最新通知，顺带刷一次登录态 */
   const refreshHome = useCallback(() => {

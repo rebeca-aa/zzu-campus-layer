@@ -7,7 +7,7 @@ import { planStudy, renderStudyPlan } from './study';
 import { pickRoom, resolveLibraryDate, seatMapDataUri, areaIdByName, FLOOR_AREA_ID, FLOOR_AREA_ALTS, areaNameOf, floorOfArea } from './library';
 import { renderCard, renderCourseTable, renderFreeRooms, renderGrades, renderLibrarySeats, renderPlanProgress, renderSeatMap, renderTodos } from './render';
 import { readLibrarySeats } from './libtab';
-import { addDays, dateOfWeek, todayShanghai, weekOfDate, weekdayOf } from './util';
+import { addDays, currentWeekOf, dateOfWeek, todayShanghai, weekOfDate, weekdayOf } from './util';
 import { buildCards, cardId, cardLine, filterCards, renderCards, sortCards, toPlainText, todayDigest } from './notice';
 import { CATEGORY_LABEL, expandNoticeQuery as expandQuery } from './noticeRules';
 
@@ -75,7 +75,7 @@ export function resolveScheduleWindow(
   today: string,
 ): ScheduleWindow {
   const { weekday, date, dated } = resolveDay(args.day, today);
-  const current = term.currentWeek && term.currentWeek > 0 ? term.currentWeek : weekOfDate(term.startDate, today);
+  const current = currentWeekOf(term, today);
   let week: number;
   if (typeof args.week === 'number' && args.week > 0) {
     week = args.week;

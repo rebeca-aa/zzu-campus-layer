@@ -712,11 +712,19 @@ export function ScheduleView(props: {
   onBack: () => void;
 }) {
   const { call, term, today } = props;
+  /* 周次范围先算出来，下面把「本周」夹在范围内 */
+  const weeks = term?.weeks?.length ? term.weeks : Array.from({ length: 19 }, (_, i) => i + 1);
+  const maxWeek = Math.max(...weeks, 1);
+  const minWeek = Math.min(...weeks, 1);
+
   /**
-   * 本周是第几周：优先用服务端给的 currentWeek；拿不到（接口没回这一项、
-   * 或者周次算失败）就用「学期首周周一 + 今天」自己推——否则一进来永远停在第 1 周。
+   * 本周是第几周：按「学期首周周一 + 今天」推（服务端 currentWeek 可能是缓存的旧值，
+   * 只在没有 startDate 时兜底），再夹进本校历的周次范围。
    */
-  const currentWeek = useMemo(() => currentWeekOf(term, today), [term, today]);
+  const currentWeek = useMemo(
+    () => Math.min(Math.max(currentWeekOf(term, today), minWeek), maxWeek),
+    [term, today, minWeek, maxWeek],
+  );
   const [week, setWeek] = useState<number>(currentWeek);
   const [courses, setCourses] = useState<Course[]>([]);
   const [loading, setLoading] = useState(true);
@@ -782,10 +790,6 @@ export function ScheduleView(props: {
       alive = false;
     };
   }, [week, props.refreshKey, tick]);
-
-  const weeks = term?.weeks?.length ? term.weeks : Array.from({ length: 19 }, (_, i) => i + 1);
-  const maxWeek = Math.max(...weeks, 1);
-  const minWeek = Math.min(...weeks, 1);
 
   const monday = mondayOf(today, week - currentWeek);
   const dayDates = Array.from({ length: 7 }, (_, i) => addDays(monday, i));
