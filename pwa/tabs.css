@@ -11,8 +11,9 @@ header.top h1 {
 }
 
 /* 米白主题：网格线用深色，不然白线压在米色上看不见 */
-html[data-theme='cream'] .grid {
-  --grid-line: rgba(20, 32, 46, 0.12);
+html[data-theme='cream'] .grid,
+html[data-theme='pink'] .grid {
+  --grid-line: rgba(58, 23, 48, 0.14);
 }
 
 /* 深色两套主题没定义 --line（沿用米白的浅茶色会太跳），改成各自发丝线 */
@@ -894,6 +895,15 @@ html[data-theme='teal'] .lesson {
   background: #123c39;
 }
 
+.theme-opt .sw-pink {
+  background: linear-gradient(135deg, #ff9ad5, #d81b60);
+}
+
+/* 亮粉：入口卡片用近白面板，别被 94% 混色压成灰 */
+html[data-theme='pink'] .bar {
+  background: var(--panel);
+}
+
 .subpage button.mini {
   margin-top: 12px;
   padding: 8px 16px;
@@ -1595,10 +1605,12 @@ p.hint.fresh .link { font-size: 11.5px; }
 }
 
 /* 米白主题：浅色课块用深一点的描边/标签底，别糊成一片 */
-html[data-theme='cream'] .grid .course {
-  border-color: rgba(20, 32, 46, 0.12);
+html[data-theme='cream'] .grid .course,
+html[data-theme='pink'] .grid .course {
+  border-color: rgba(58, 23, 48, 0.14);
 }
 
-html[data-theme='cream'] .grid .course .tag {
-  background: rgba(20, 32, 46, 0.12);
+html[data-theme='cream'] .grid .course .tag,
+html[data-theme='pink'] .grid .course .tag {
+  background: rgba(58, 23, 48, 0.14);
 }

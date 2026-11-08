@@ -137,12 +137,14 @@ const THEME_COLOR: Record<Exclude<ThemeKey, 'custom'>, string> = {
   cream: '#f4ebd7',
   ink: '#0b1220',
   teal: '#07191a',
+  pink: '#fdeef8',
 };
 
 const THEME_LABEL: Record<ThemeName, string> = {
   cream: '米白',
   ink: '藏青',
   teal: '蓝绿',
+  pink: '亮粉',
   custom: '自定义',
 };
 
@@ -1547,12 +1549,13 @@ const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
                     ['cream', '米白'],
                     ['ink', '藏青'],
                     ['teal', '蓝绿'],
+                    ['pink', '亮粉'],
                     ['custom', '自定义'],
                   ] as const
                 ).map(([key, label], index) => (
                   <Fragment key={key}>
                     {/* 三枚放一行，「自定义」自己换到下一行，窄屏也不会被裁掉 */}
-                    {index === 3 ? <span class="theme-break" aria-hidden="true" /> : null}
+                    {key === 'custom' ? <span class="theme-break" aria-hidden="true" /> : null}
                     <button
                       class={`theme-opt${theme === key ? ' on' : ''}`}
                       onClick={() => void applyTheme(key)}

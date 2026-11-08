@@ -1077,6 +1077,63 @@ html[data-theme='teal'] {
   color-scheme: dark;
 }
 
+/* ===== 亮粉：整体偏亮的浅粉主题（少紫多粉） ===== */
+html[data-theme='pink'] {
+  --bg: #fff0f6;
+  --panel: #fffafc;
+  --input: #ffe0ec;
+  --line: #f2b9d0;
+  --hairline: #f2b9d0;
+  --text: #3d1622;
+  --dim: #8f5f70;
+  --accent: #d81b60;
+  --link: #c2185b;
+  --placeholder: #b98aa0;
+  --self-bubble: #d81b60;
+  --self-bubble-text: #fff7fa;
+  --header-line: #f2b9d0;
+  --shade: #ffe4f0;
+  --ok: #17754f;
+  --warn: #a2650a;
+  --err: #b3261e;
+  color-scheme: light;
+}
+
+/* 亮粉：浅粉面板上原本「加粗变白」的规则要压回深色 */
+html[data-theme='pink'] .bubble .md strong,
+html[data-theme='pink'] .bubble strong {
+  color: var(--text) !important;
+}
+
+/* 自己的气泡：强调色底 + 白字，和米白那套的处理一致 */
+html[data-theme='pink'] .msg.user .bubble {
+  background: var(--accent) !important;
+  color: var(--self-bubble-text) !important;
+  border-color: var(--accent) !important;
+}
+
+html[data-theme='pink'] .msg.user .bubble strong,
+html[data-theme='pink'] .msg.user .bubble .md strong {
+  color: var(--self-bubble-text) !important;
+}
+
+html[data-theme='pink'] .msg.user .bubble a {
+  color: #ffe3f7;
+}
+
+/* 亮粉：底栏、顶栏这些通用件原来是米白的米黄底色/描边，这里换成粉 */
+html[data-theme='pink'] .dock {
+  background: var(--shade) !important;
+}
+
+html[data-theme='pink'] .dock .composer button {
+  color: var(--accent) !important;
+}
+
+html[data-theme='pink'] header {
+  border-bottom: 1px solid var(--line) !important;
+}
+
 html[data-theme='ink'] body,
 html[data-theme='teal'] body {
   background: var(--bg);

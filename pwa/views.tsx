@@ -762,7 +762,7 @@ function hslToHex(h: number, s: number, l: number): string {
  */
 function coursePaint(base: string, theme: string): { bg: string; ink: string } {
   let bg: string;
-  if (theme === 'cream') {
+  if (theme === 'cream' || theme === 'pink') {
     /* 保留色相、提亮降饱和，做成能分辨的浅色块，而不是混成一片灰 */
     const [h, s] = rgbToHsl(base);
     bg = hslToHex(h, Math.min(0.6, Math.max(0.4, s * 1.8)), 0.83);
@@ -1199,7 +1199,7 @@ export function MineView(props: {
             <span class="ic"><MineIcon name="theme" /></span>
             <span class="tx">
               <span class="t">外观</span>
-              <span class="s">米白 / 藏青 / 蓝绿</span>
+              <span class="s">米白 / 藏青 / 蓝绿 / 亮粉</span>
             </span>
             <span class="val">{props.themeLabel}</span>
             <span class="chev">›</span>

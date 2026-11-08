@@ -79,6 +79,7 @@ describe('theme 自定义参数', () => {
     expect(parseThemeKey('custom')).toBe('custom');
     expect(parseThemeKey('cream')).toBe('cream');
     expect(parseThemeKey('teal')).toBe('teal');
+    expect(parseThemeKey('pink')).toBe('pink');
     expect(parseThemeKey('dark')).toBe('ink');
     expect(parseThemeKey(undefined)).toBe('ink');
   });

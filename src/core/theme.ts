@@ -6,9 +6,9 @@
  * 免得出现「某个角落的颜色不跟手」。所有函数都是纯的，方便单测。
  */
 
-export type ThemeKey = 'cream' | 'ink' | 'teal' | 'custom';
+export type ThemeKey = 'cream' | 'ink' | 'teal' | 'pink' | 'custom';
 
-export const THEME_KEYS: ThemeKey[] = ['cream', 'ink', 'teal', 'custom'];
+export const THEME_KEYS: ThemeKey[] = ['cream', 'ink', 'teal', 'pink', 'custom'];
 
 export const CUSTOM_KEY = 'themeCustom';
 
@@ -197,7 +197,7 @@ export function normalizeCustom(raw: unknown): CustomTheme {
 }
 
 export function parseThemeKey(raw: unknown): ThemeKey {
-  return raw === 'cream' || raw === 'teal' || raw === 'custom' ? raw : 'ink';
+  return raw === 'cream' || raw === 'teal' || raw === 'pink' || raw === 'custom' ? raw : 'ink';
 }
 
 /** 按 HTML 里那套变量名给出配色；全部是合法 CSS 值。 */
