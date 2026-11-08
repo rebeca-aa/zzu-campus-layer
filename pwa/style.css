@@ -658,6 +658,8 @@ p.hint {
   --panel: #f4ebd7;
   --input: #e6d9bb;
   --line: #d8c4a0;
+  /* 米白没有单独的发丝线，沿用分区线；不然 .theme-opt 这类边框会因为变量缺失直接不画 */
+  --hairline: var(--line);
   --text: #14181f;
   --dim: #6b6250;
   --accent: #1b4fd8;
