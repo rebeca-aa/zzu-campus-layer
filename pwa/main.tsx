@@ -1,4 +1,4 @@
-import { render } from 'preact';
+import { Fragment, render } from 'preact';
 
 declare const __APP_VERSION__: string;
 import { HoldButton } from '../src/ui/hold';
@@ -1549,15 +1549,18 @@ const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
                     ['teal', '蓝绿'],
                     ['custom', '自定义'],
                   ] as const
-                ).map(([key, label]) => (
-                  <button
-                    key={key}
-                    class={`theme-opt${theme === key ? ' on' : ''}`}
-                    onClick={() => void applyTheme(key)}
-                  >
-                    <i class={`sw-${key}`} />
-                    {label}
-                  </button>
+                ).map(([key, label], index) => (
+                  <Fragment key={key}>
+                    {/* 三枚放一行，「自定义」自己换到下一行，窄屏也不会被裁掉 */}
+                    {index === 3 ? <span class="theme-break" aria-hidden="true" /> : null}
+                    <button
+                      class={`theme-opt${theme === key ? ' on' : ''}`}
+                      onClick={() => void applyTheme(key)}
+                    >
+                      <i class={`sw-${key}`} />
+                      {label}
+                    </button>
+                  </Fragment>
                 ))}
               </div>
               {theme === 'custom' ? (

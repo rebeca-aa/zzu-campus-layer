@@ -847,13 +847,16 @@ html[data-theme='teal'] .lesson {
 .dock { margin-bottom: calc(var(--nav-h) + env(safe-area-inset-bottom)); }
 
 /* 二级页里的通用小件：配色选择、测试连接按钮、关于页的键值行 */
+/* 四个选项放不下一行时整体换行：别让「自定义」被挤出卡片 */
 .theme-pick {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   margin-top: 4px;
 }
 .theme-opt {
   display: flex;
+  flex: 0 0 auto;
   align-items: center;
   gap: 7px;
   padding: 8px 13px;
@@ -1418,6 +1421,12 @@ html[data-theme='custom'] .theme-pick,
 .theme-pick.has-custom .theme-opt i {
   width: 14px;
   height: 14px;
+}
+
+/* 「自定义」单独占一行：四个并排时它最宽，窄屏上会被挤出卡片 */
+.theme-break {
+  flex: 0 0 100%;
+  height: 0;
 }
 
 /* ---------------- 登录页（一屏一件事） ---------------- */
