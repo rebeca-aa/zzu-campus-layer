@@ -53,7 +53,7 @@ import {
 import { displayDayShanghai, msUntilMidnightShanghai, msUntilRollover, todayShanghai, weekOfDate } from '../src/core/util';
 import type { Term } from '../src/core/types';
 import { NoticeBoard } from '../src/ui/notice';
-import { HomeView, HueLine, LineSlider, MineView, ScheduleView, TabBar, type Caller, type TabKey } from './views';
+import { HomeView, HueLine, LineSlider, MineView, ScheduleView, TabBar, WeatherView, type Caller, type TabKey } from './views';
 import { fetchRelease, isNewer, SEEN_KEY, shouldAnnounce, type Release } from './update';
 import {
   applyCustomVars,
@@ -1250,6 +1250,12 @@ const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
             refreshKey={homeRefresh}
             onBack={() => goTab('home')}
           />
+        </div>
+      )}
+
+      {tab === 'weather' && (
+        <div class="page-live" key="weather">
+          <WeatherView today={today} />
         </div>
       )}
 

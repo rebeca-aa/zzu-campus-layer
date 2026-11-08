@@ -677,7 +677,7 @@ html[data-theme='teal'] .lesson {
   height: calc(var(--nav-h) + env(safe-area-inset-bottom));
   padding-bottom: env(safe-area-inset-bottom);
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(4, 1fr);
   align-items: center;
   background: color-mix(in srgb, var(--bg) 92%, #000);
   border-top: 1px solid var(--line);
@@ -1613,4 +1613,219 @@ html[data-theme='pink'] .grid .course {
 html[data-theme='cream'] .grid .course .tag,
 html[data-theme='pink'] .grid .course .tag {
   background: rgba(58, 23, 48, 0.14);
+}
+
+/* ---------------- 天气页 ---------------- */
+
+.wx-now {
+  padding: 16px 16px 13px;
+}
+
+.wx-main {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  color: var(--accent);
+}
+
+.wx-temp {
+  display: flex;
+  align-items: flex-start;
+  color: var(--text);
+  line-height: 1;
+}
+
+.wx-temp b {
+  font-size: 64px;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+}
+
+.wx-temp span {
+  margin-top: 5px;
+  color: var(--dim);
+  font-size: 15px;
+}
+
+.wx-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  color: var(--dim);
+  font-size: 12.5px;
+}
+
+.wx-meta strong {
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.wx-sub {
+  margin-top: 10px;
+  padding-top: 9px;
+  border-top: 1px dashed var(--hairline);
+  color: var(--dim);
+  font-size: 12px;
+}
+
+.wx-days {
+  padding: 13px 14px 6px;
+}
+
+.wx-day {
+  display: grid;
+  grid-template-columns: 64px 28px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 0;
+  border-top: 1px dashed var(--hairline);
+  color: var(--dim);
+}
+
+.wx-day:first-of-type {
+  border-top: 0;
+}
+
+.wx-day.on {
+  color: var(--text);
+}
+
+.wx-d1 {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.wx-d1 strong {
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.wx-d1 span {
+  color: var(--dim);
+  font-size: 11px;
+}
+
+.wx-d2 {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.wx-d2 span {
+  color: var(--text);
+  font-size: 13.5px;
+}
+
+.wx-d2 em {
+  color: var(--dim);
+  font-size: 11px;
+  font-style: normal;
+}
+
+.wx-d3 {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-variant-numeric: tabular-nums;
+}
+
+.wx-d3 b {
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.wx-d3 span {
+  color: var(--dim);
+  font-size: 13px;
+}
+
+.wx-day svg {
+  color: var(--accent);
+}
+
+.wx-alert {
+  margin: 0;
+  padding: 10px 13px;
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+  border-radius: 11px;
+  background: color-mix(in srgb, var(--accent) 12%, var(--panel));
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.wx-hours {
+  padding: 13px 14px 10px;
+}
+
+.wx-hour-list {
+  display: flex;
+  gap: 14px;
+  overflow-x: auto;
+  padding: 6px 0 2px;
+  scrollbar-width: none;
+}
+
+.wx-hour-list::-webkit-scrollbar {
+  display: none;
+}
+
+.wx-hour {
+  flex: 0 0 auto;
+  min-width: 44px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  color: var(--dim);
+}
+
+.wx-hour .h {
+  font-size: 11px;
+  color: var(--dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.wx-hour svg {
+  color: var(--accent);
+}
+
+.wx-hour b {
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.wx-hour em {
+  min-height: 12px;
+  color: var(--accent);
+  font-size: 10px;
+  font-style: normal;
+}
+
+.wx-hour.on .h {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.wx-hour.on b {
+  color: var(--accent);
+}
+
+.wx-alert-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.wx-alert-sent {
+  padding-left: 2px;
+  color: var(--dim);
+  font-size: 11px;
 }

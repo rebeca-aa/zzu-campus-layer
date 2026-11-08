@@ -27,7 +27,8 @@
     "https://dashscope.aliyuncs.com/*",
     "https://api.moonshot.cn/*",
     "https://openrouter.ai/*",
-    "https://open.bigmodel.cn/*"
+    "https://open.bigmodel.cn/*",
+    "https://api.open-meteo.com/*"
   ],
   "background": {
     "service_worker": "background.js",

@@ -2,8 +2,9 @@ import type { ComponentChildren } from 'preact';
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { createPortal } from 'preact/compat';
 import type { Course, Term } from '../src/core/types';
-import { currentWeekOf } from '../src/core/util';
+import { currentWeekOf, diffDays, weekdayOf } from '../src/core/util';
 import { ageText, readCache, writeCache } from '../src/core/offline';
+import { loadWeather, rainReminder, type Weather, type WeatherIconName } from '../src/core/weather';
 import {
   MAX_HOME_BARS,
   MAX_HOME_BAR_LABEL,
@@ -16,7 +17,7 @@ import {
   type HomeBar,
 } from '../src/core/homeBars';
 
-export type TabKey = 'home' | 'ai' | 'schedule' | 'mine';
+export type TabKey = 'home' | 'ai' | 'weather' | 'schedule' | 'mine';
 
 /** 一次工具调用的结果；失败时 ok=false，error 是给人看的一句话 */
 export type Caller = (name: string, args?: Record<string, unknown>) => Promise<{ ok: boolean; data?: any; error?: string }>;
@@ -25,6 +26,7 @@ export type Caller = (name: string, args?: Record<string, unknown>) => Promise<{
 const TABS: { key: TabKey; label: string }[] = [
   { key: 'home', label: '主页' },
   { key: 'ai', label: 'AI' },
+  { key: 'weather', label: '天气' },
   { key: 'mine', label: '我的' },
 ];
 
@@ -130,6 +132,15 @@ function TabIcon({ name }: { name: TabKey }) {
       <svg {...common} aria-hidden="true">
         <path d="M4.6 6.8A2.6 2.6 0 0 1 7.2 4.2h9.6a2.6 2.6 0 0 1 2.6 2.6v6.4a2.6 2.6 0 0 1-2.6 2.6H9.4L5.6 19v-2.9a2.6 2.6 0 0 1-1-2.1Z" />
         <path d="M12 8.2v4.4M9.8 10.4h4.4" />
+      </svg>
+    );
+  }
+  if (name === 'weather') {
+    return (
+      <svg {...common} aria-hidden="true">
+        <circle cx="9" cy="9.4" r="3.2" />
+        <path d="M9 3.4v1.6M3.4 9.4H5M4.9 5.3l1.1 1.1M13.1 5.3l-1.1 1.1" />
+        <path d="M10.6 19.4h7.1a3.1 3.1 0 0 0 .2-6.2 4.3 4.3 0 0 0-8.2.8 2.7 2.7 0 0 0 .9 5.4Z" />
       </svg>
     );
   }
@@ -1090,6 +1101,287 @@ export function ScheduleView(props: {
 
 /* ---------------- 宿舍电量 ---------------- */
 
+
+/* ---------------- 天气 ---------------- */
+
+/** 天气图标：统一 24 栅格线框，颜色跟随当前文字色 */
+function WeatherGlyph({ name, size = 28 }: { name: WeatherIconName; size?: number }) {
+  const common = {
+    viewBox: '0 0 24 24',
+    fill: 'none',
+    stroke: 'currentColor',
+    'stroke-width': '1.7',
+    'stroke-linecap': 'round' as const,
+    'stroke-linejoin': 'round' as const,
+    width: size,
+    height: size,
+    'aria-hidden': true,
+  };
+  const cloud = <path d="M7.2 18.6h9.2a3.3 3.3 0 0 0 .2-6.6 4.6 4.6 0 0 0-8.8.9 2.9 2.9 0 0 0-.6 5.7Z" />;
+  if (name === 'sun') {
+    return (
+      <svg {...common}>
+        <circle cx="12" cy="12" r="4.1" />
+        <path d="M12 3.4v2.1M12 18.5v2.1M3.4 12h2.1M18.5 12h2.1M6 6l1.5 1.5M16.5 16.5 18 18M18 6l-1.5 1.5M7.5 16.5 6 18" />
+      </svg>
+    );
+  }
+  if (name === 'partly') {
+    return (
+      <svg {...common}>
+        <circle cx="9.2" cy="9" r="3.1" />
+        <path d="M9.2 3.6v1.5M3.8 9H5.3M5.4 5.2l1 1M13 5.2l-1 1" />
+        {cloud}
+      </svg>
+    );
+  }
+  if (name === 'cloud') return <svg {...common}>{cloud}</svg>;
+  if (name === 'overcast') {
+    return (
+      <svg {...common}>
+        <path d="M4.6 14.2h9.1a2.9 2.9 0 0 0 .2-5.8 4 4 0 0 0-7.7.8 2.6 2.6 0 0 0-1.6 5Z" />
+        <path d="M8.2 19h9.2a3.1 3.1 0 0 0 .2-6.2 4.3 4.3 0 0 0-8.2.8 2.7 2.7 0 0 0-1.2 5.4Z" />
+      </svg>
+    );
+  }
+  if (name === 'fog') {
+    return (
+      <svg {...common}>
+        {cloud}
+        <path d="M5.4 21h9.6M7.4 23h8.6" />
+      </svg>
+    );
+  }
+  if (name === 'drizzle') {
+    return (
+      <svg {...common}>
+        {cloud}
+        <path d="M9.4 20.2v1.4M13.6 20.4v1.4" />
+      </svg>
+    );
+  }
+  if (name === 'rain') {
+    return (
+      <svg {...common}>
+        {cloud}
+        <path d="M8.4 20.2 7.8 22M12 20.2 11.4 22M15.6 20.2 15 22" />
+      </svg>
+    );
+  }
+  if (name === 'sleet') {
+    return (
+      <svg {...common}>
+        {cloud}
+        <path d="M8.6 20.4v1.8M7.7 21.3h1.8M14.4 20.4v1.8M13.5 21.3h1.8" />
+      </svg>
+    );
+  }
+  if (name === 'snow') {
+    return (
+      <svg {...common}>
+        {cloud}
+        <path d="M8.4 20.4v2M7.4 20.9l2 1M9.4 20.9l-2 1M15.6 20.4v2M14.6 20.9l2 1M16.6 20.9l-2 1" />
+      </svg>
+    );
+  }
+  return (
+    <svg {...common}>
+      {cloud}
+      <path d="m12.6 19.6-2.2 3.2h2.4l-1.4 2.6" />
+    </svg>
+  );
+}
+
+/** 昨天 / 今天 / 明天 / 后天 —— 只看真实日期，不跟课表的 20:00 翻页走 */
+const WX_LABEL: Record<number, string> = { [-1]: '昨天', 0: '今天', 1: '明天', 2: '后天' };
+const WEEK_CN = ['', '周一', '周二', '周三', '周四', '周五', '周六', '周日'];
+
+export function WeatherView({ today }: { today: string }) {
+  const [wx, setWx] = useState<Weather | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState('');
+  const [tick, setTick] = useState(0);
+  const [refreshing, setRefreshing] = useState(false);
+  const [tipSent, setTipSent] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    setErr('');
+    void (async () => {
+      try {
+        const data = await loadWeather(Date.now(), tick > 0);
+        if (alive) setWx(data);
+      } catch (e) {
+        if (alive) setErr(e instanceof Error ? e.message : String(e));
+      } finally {
+        if (alive) {
+          setLoading(false);
+          setRefreshing(false);
+        }
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [tick]);
+
+  const days = (wx?.days ?? []).filter((d) => {
+    const diff = diffDays(today, d.date);
+    return diff >= -1 && diff <= 2;
+  });
+  const stale = wx ? Date.now() - wx.fetchedAt > 30 * 60_000 : false;
+  const todayDay = days.find((d) => diffDays(today, d.date) === 0);
+  const alert = rainReminder(todayDay);
+
+  /* 有雨提示每天只发一次：壳里走系统通知，浏览器里走 Notification（授权过才发） */
+  useEffect(() => {
+    if (!wx || !alert) return;
+    const key = 'campus-layer:weatherTip';
+    try {
+      if (localStorage.getItem(key) === today) return;
+      localStorage.setItem(key, today);
+    } catch {
+      return;
+    }
+    try {
+      window.dispatchEvent(new CustomEvent('campus-note', { detail: alert }));
+    } catch {
+      /* 没有 toast 监听就算了 */
+    }
+    const bridge = (window as unknown as { CampusNotify?: { notify?: (t: string, b: string) => void } }).CampusNotify;
+    try {
+      if (bridge?.notify) {
+        bridge.notify('天气提醒', alert);
+        setTipSent(true);
+        return;
+      }
+    } catch {
+      /* 壳里发失败就退回下面 */
+    }
+    if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+      try {
+        new Notification('天气提醒', { body: alert });
+        setTipSent(true);
+      } catch {
+        /* 忽略 */
+      }
+    }
+  }, [wx, alert, today]);
+  const nowKey = wx?.now.at ? wx.now.at.slice(0, 13) : '';
+  /* 逐小时只留今天、且从当前这个小时往后（免得一进来先看到早上的） */
+  const hours = (wx?.hours ?? []).filter(
+    (h) => h.time.startsWith(today) && (!nowKey || h.time.slice(0, 13) >= nowKey),
+  );
+
+  return (
+    <>
+      <header class="top">
+        <div class="who">
+          <h1>天气</h1>
+          <div class="sub">郑州 · 主校区</div>
+        </div>
+        <div class="acts">
+          <button
+            class={`iconbtn${refreshing ? ' spin' : ''}`}
+            aria-label="刷新天气"
+            disabled={refreshing}
+            onClick={() => {
+              setRefreshing(true);
+              setTick((n) => n + 1);
+            }}
+          >
+            <RefreshIcon />
+          </button>
+        </div>
+      </header>
+
+      <main class="tabbody">
+        {err && <p class="empty-line">天气没拉到：{err}</p>}
+        {alert && (
+          <div class="wx-alert-wrap">
+            <p class="wx-alert">{alert}</p>
+            {tipSent && <span class="wx-alert-sent">已发送一次通知，今天不再重复</span>}
+          </div>
+        )}
+        {loading && !wx && <p class="empty-line">正在读天气…</p>}
+
+        {wx && (
+          <section class="card wx-now">
+            <div class="wx-main">
+              <WeatherGlyph name={wx.now.icon} size={56} />
+              <div class="wx-temp">
+                <b>{Math.round(wx.now.temp)}</b>
+                <span>°C</span>
+              </div>
+              <div class="wx-meta">
+                <strong>{wx.now.label}</strong>
+                <span>体感 {Math.round(wx.now.feels)}°</span>
+              </div>
+            </div>
+            <div class="wx-sub">
+              {wx.now.humidity !== undefined ? `湿度 ${wx.now.humidity}%` : ''}
+              {wx.now.wind !== undefined ? ` · 风速 ${Math.round(wx.now.wind)} km/h` : ''}
+              {wx.now.at ? ` · ${wx.now.at.slice(11, 16)} 更新` : ''}
+              {stale ? ' · 显示的是上次缓存' : ''}
+            </div>
+          </section>
+        )}
+
+        {hours.length > 0 && (
+          <section class="card wx-hours">
+            <div class="cardhead">
+              <strong>今天逐小时</strong>
+              <span>{hours[0]!.time.slice(11, 16)} 起</span>
+            </div>
+            <div class="wx-hour-list">
+              {hours.map((h) => (
+                <div class={`wx-hour${h.time.slice(0, 13) === nowKey ? ' on' : ''}`} key={h.time}>
+                  <span class="h">{h.time.slice(11, 16)}</span>
+                  <WeatherGlyph name={h.icon} size={22} />
+                  <b>{Math.round(h.temp)}°</b>
+                  <em>{h.rain !== null && h.rain > 0 ? `${h.rain}%` : ''}</em>
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
+
+        {days.length > 0 && (
+          <section class="card wx-days">
+            <div class="cardhead">
+              <strong>多日天气</strong>
+              <span>按真实日期</span>
+            </div>
+            {days.map((d) => {
+              const diff = diffDays(today, d.date);
+              return (
+                <div class={`wx-day${diff === 0 ? ' on' : ''}`} key={d.date}>
+                  <div class="wx-d1">
+                    <strong>{WX_LABEL[diff] ?? d.date.slice(5)}</strong>
+                    <span>
+                      {d.date.slice(5).replace('-', '/')} {WEEK_CN[weekdayOf(d.date)]}
+                    </span>
+                  </div>
+                  <WeatherGlyph name={d.icon} size={26} />
+                  <div class="wx-d2">
+                    <span>{d.label}</span>
+                    {d.rain !== null && d.rain > 0 && <em>降水 {d.rain}%</em>}
+                  </div>
+                  <div class="wx-d3">
+                    <b>{Math.round(d.max)}°</b>
+                    <span>{Math.round(d.min)}°</span>
+                  </div>
+                </div>
+              );
+            })}
+          </section>
+        )}
+
+        <p class="hint">天气数据来自 Open-Meteo，30 分钟更新一次；断网时显示上次结果。</p>
+      </main>
+    </>
+  );
+}
 
 /* ---------------- 我的 ---------------- */
 
