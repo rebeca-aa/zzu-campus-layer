@@ -2,9 +2,9 @@ import type { ComponentChildren } from 'preact';
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { createPortal } from 'preact/compat';
 import type { Course, Term } from '../src/core/types';
-import { currentWeekOf, diffDays, weekdayOf } from '../src/core/util';
+import { currentWeekOf, diffDays, shanghaiHour, weekdayOf } from '../src/core/util';
 import { ageText, readCache, writeCache } from '../src/core/offline';
-import { loadWeather, rainReminder, type Weather, type WeatherIconName } from '../src/core/weather';
+import { dressAdvice, dressAdviceFor, loadWeather, rainReminder, type Weather, type WeatherIconName } from '../src/core/weather';
 import {
   MAX_HOME_BARS,
   MAX_HOME_BAR_LABEL,
@@ -1203,6 +1203,13 @@ export function WeatherView({ today }: { today: string }) {
   const [tick, setTick] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
   const [tipSent, setTipSent] = useState(false);
+  /* 22:00 之后要把「今日着装」换成「明日着装」，每分钟看一眼钟 */
+  const [nowTs, setNowTs] = useState(() => Date.now());
+
+  useEffect(() => {
+    const timer = setInterval(() => setNowTs(Date.now()), 60_000);
+    return () => clearInterval(timer);
+  }, []);
 
   useEffect(() => {
     let alive = true;
@@ -1232,6 +1239,13 @@ export function WeatherView({ today }: { today: string }) {
   const stale = wx ? Date.now() - wx.fetchedAt > 30 * 60_000 : false;
   const todayDay = days.find((d) => diffDays(today, d.date) === 0);
   const alert = rainReminder(todayDay);
+  const tomorrow = days.find((d) => diffDays(today, d.date) === 1);
+  const lateNight = shanghaiHour(nowTs) >= 22;
+  const dress = wx
+    ? lateNight && tomorrow
+      ? { label: '明日着装', ...dressAdviceFor(Math.round((tomorrow.max + tomorrow.min) / 2), tomorrow) }
+      : { label: '今日着装', ...dressAdvice(wx.now, todayDay) }
+    : null;
 
   /* 有雨提示每天只发一次：壳里走系统通知，浏览器里走 Notification（授权过才发） */
   useEffect(() => {
@@ -1317,6 +1331,13 @@ export function WeatherView({ today }: { today: string }) {
                 <strong>{wx.now.label}</strong>
                 <span>体感 {Math.round(wx.now.feels)}°</span>
               </div>
+              {dress && (
+                <div class="wx-dress">
+                  <span class="lbl">{dress.label}</span>
+                  <strong>{dress.main}</strong>
+                  {dress.extra && <em>{dress.extra}</em>}
+                </div>
+              )}
             </div>
             <div class="wx-sub">
               {wx.now.humidity !== undefined ? `湿度 ${wx.now.humidity}%` : ''}

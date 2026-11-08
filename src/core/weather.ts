@@ -210,6 +210,37 @@ export function parseWeather(raw: unknown, fetchedAt = Date.now()): Weather {
   };
 }
 
+export interface DressAdvice {
+  /** 主建议：穿什么 */
+  main: string;
+  /** 附加提醒：带伞 / 防滑 / 防风，没有就是空串 */
+  extra: string;
+}
+
+/** 按「体感/代表温度」给着装建议；晚上 22 点后会用明天的温度调这个函数 */
+export function dressAdviceFor(temp: number, day?: WeatherDay, wind = 0): DressAdvice {
+  const t = Math.round(temp);
+  let main: string;
+  if (t >= 30) main = '短袖短裤，注意防晒';
+  else if (t >= 24) main = '短袖 + 薄外套';
+  else if (t >= 18) main = '长袖 + 薄外套';
+  else if (t >= 12) main = '毛衣 + 外套';
+  else if (t >= 5) main = '厚外套 / 棉服';
+  else main = '羽绒服 + 围巾手套';
+
+  let extra = '';
+  const icon = day?.icon;
+  if (icon === 'rain' || icon === 'drizzle' || icon === 'thunder') extra = '有雨，记得带伞';
+  else if (icon === 'snow' || icon === 'sleet') extra = '有雨雪，注意防滑';
+  else if (wind >= 35) extra = '风大，加件防风外套';
+  return { main, extra };
+}
+
+/** 今日着装建议：按体感温度分档，再看有没有雨雪、风大不大 */
+export function dressAdvice(now: WeatherNow, day?: WeatherDay): DressAdvice {
+  return dressAdviceFor(now.feels, day ?? { icon: now.icon } as WeatherDay, now.wind ?? 0);
+}
+
 /** 今天有没有雨：看今天的天气码和降水概率，返回给用户看的一句话（没雨返回 null） */
 export function rainReminder(day: WeatherDay | undefined): string | null {
   if (!day) return null;

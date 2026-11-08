@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseWeather, rainReminder, weatherIcon, weatherLabel } from '../src/core/weather';
+import { dressAdvice, parseWeather, rainReminder, weatherIcon, weatherLabel } from '../src/core/weather';
 
 describe('天气码 → 中文 / 图标', () => {
   it('常见天气', () => {
@@ -88,5 +88,26 @@ describe('rainReminder', () => {
   it('晴天 / 没数据不提示', () => {
     expect(rainReminder({ date: '2026-11-08', code: 0, label: '晴', icon: 'sun', max: 20, min: 8, rain: 0 })).toBeNull();
     expect(rainReminder(undefined)).toBeNull();
+  });
+});
+
+describe('dressAdvice', () => {
+  const now = (feels: number, wind = 10, icon: any = 'cloud') => ({
+    temp: feels, feels, code: 2, label: '多云', icon, wind, at: '2026-11-08T15:00',
+  });
+
+  it('按体感温度分档', () => {
+    expect(dressAdvice(now(33)).main).toContain('短袖');
+    expect(dressAdvice(now(25)).main).toContain('薄外套');
+    expect(dressAdvice(now(15)).main).toContain('毛衣');
+    expect(dressAdvice(now(8)).main).toContain('厚外套');
+    expect(dressAdvice(now(0)).main).toContain('羽绒');
+  });
+
+  it('有雨提醒带伞、雨雪提醒防滑、风大提醒防风', () => {
+    expect(dressAdvice(now(10, 10, 'rain')).extra).toContain('伞');
+    expect(dressAdvice(now(10, 10, 'snow')).extra).toContain('防滑');
+    expect(dressAdvice(now(10, 40, 'cloud')).extra).toContain('防风');
+    expect(dressAdvice(now(20, 10, 'sun')).extra).toBe('');
   });
 });

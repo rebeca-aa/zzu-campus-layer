@@ -1858,3 +1858,34 @@ html[data-theme='pink'] .grid .course .tag {
 .wx-day.on .wx-d1 strong {
   font-weight: 650;
 }
+
+/* 今日着装建议：放在实时天气右侧，窄屏也不挤掉温度 */
+.wx-dress {
+  margin-left: auto;
+  max-width: 46%;
+  padding-left: 10px;
+  border-left: 1px dashed var(--hairline);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  text-align: right;
+}
+
+.wx-dress .lbl {
+  color: var(--dim);
+  font-size: 11px;
+}
+
+.wx-dress strong {
+  color: var(--text);
+  font-size: 12.5px;
+  font-weight: 600;
+  line-height: 1.45;
+}
+
+.wx-dress em {
+  color: var(--accent);
+  font-size: 11px;
+  font-style: normal;
+  line-height: 1.4;
+}
