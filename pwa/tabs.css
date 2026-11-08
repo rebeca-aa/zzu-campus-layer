@@ -1718,6 +1718,7 @@ html[data-theme='pink'] .grid .course .tag {
 .wx-d2 span {
   color: var(--text);
   font-size: 13.5px;
+  font-weight: 400;
 }
 
 .wx-d2 em {
@@ -1828,4 +1829,32 @@ html[data-theme='pink'] .grid .course .tag {
   padding-left: 2px;
   color: var(--dim);
   font-size: 11px;
+}
+
+/* 昨天：整体压暗、字变淡，往后看的时候不抢眼；今天加重一点 */
+.wx-day.past {
+  opacity: 0.66;
+}
+
+.wx-day.past .wx-d1 strong,
+.wx-day.past .wx-d2 span,
+.wx-day.past .wx-d3 b {
+  color: var(--dim);
+  font-weight: 400;
+}
+
+.wx-day.past svg {
+  opacity: 0.7;
+}
+
+.wx-day.on .wx-d2 span {
+  font-weight: 600;
+}
+
+.wx-day.past .wx-d2 span {
+  font-weight: 400;
+}
+
+.wx-day.on .wx-d1 strong {
+  font-weight: 650;
 }

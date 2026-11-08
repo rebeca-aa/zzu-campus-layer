@@ -10,8 +10,8 @@ android {
     applicationId = "cn.zzu.campuslayer"
     minSdk = 24
     targetSdk = 34
-    versionCode = 90
-    versionName = "0.2.105"
+    versionCode = 91
+    versionName = "0.2.106"
   }
 
   compileOptions {

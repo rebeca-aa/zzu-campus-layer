@@ -1355,7 +1355,7 @@ export function WeatherView({ today }: { today: string }) {
             {days.map((d) => {
               const diff = diffDays(today, d.date);
               return (
-                <div class={`wx-day${diff === 0 ? ' on' : ''}`} key={d.date}>
+                <div class={`wx-day${diff === 0 ? ' on' : ''}${diff === -1 ? ' past' : ''}`} key={d.date}>
                   <div class="wx-d1">
                     <strong>{WX_LABEL[diff] ?? d.date.slice(5)}</strong>
                     <span>
