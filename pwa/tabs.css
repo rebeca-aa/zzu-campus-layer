@@ -748,9 +748,16 @@ html[data-theme='teal'] .lesson {
   border-radius: 9px;
   display: grid;
   place-items: center;
-  background: rgba(76, 141, 255, 0.14);
-  color: #9dc0ff;
+  /* 跟着强调色走：浅色主题偏深、深色主题偏亮，图标始终看得清 */
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+  color: color-mix(in srgb, var(--accent) 60%, var(--text));
   font-size: 15px;
+}
+
+.mine-row .ic svg {
+  width: 18px;
+  height: 18px;
+  display: block;
 }
 .mine-row .tx {
   flex: 1 1 auto;

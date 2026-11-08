@@ -1,3 +1,4 @@
+import type { ComponentChildren } from 'preact';
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { createPortal } from 'preact/compat';
 import type { Course, Term } from '../src/core/types';
@@ -28,6 +29,83 @@ const TABS: { key: TabKey; label: string }[] = [
 ];
 
 /** 底部四栏的图标：描边 1.8，24 网格，-currentColor 跟随选中态 */
+type MineIconName = 'login' | 'library' | 'renew' | 'alarm' | 'bell' | 'theme' | 'gear' | 'edit' | 'download' | 'info';
+
+/** 「我的」页的线框图标：统一 24 栅格、currentColor 描边，颜色由主题决定 */
+function MineIcon({ name }: { name: MineIconName }) {
+  const paths: Record<MineIconName, ComponentChildren> = {
+    login: (
+      <>
+        <circle cx="12" cy="8" r="3.4" />
+        <path d="M5.2 20c.6-3.5 3.3-5.6 6.8-5.6s6.2 2.1 6.8 5.6" />
+      </>
+    ),
+    library: (
+      <>
+        <path d="M12 6.4c-1.5-1.3-3.5-2-5.9-2H4.4v13h1.7c2.4 0 4.4.7 5.9 2 1.5-1.3 3.5-2 5.9-2h1.7v-13h-1.7c-2.4 0-4.4.7-5.9 2z" />
+        <path d="M12 6.4v13" />
+      </>
+    ),
+    renew: (
+      <>
+        <rect x="4" y="5.5" width="16" height="15" rx="2.5" />
+        <path d="M8 3.5v4M16 3.5v4M4 10.2h16" />
+      </>
+    ),
+    alarm: (
+      <>
+        <circle cx="12" cy="13" r="6.4" />
+        <path d="M12 10v3.2l2.1 1.3" />
+        <path d="M5.2 4.8 7.3 2.9M18.8 4.8l-2.1-1.9" />
+      </>
+    ),
+    bell: (
+      <>
+        <path d="M4.8 6.2h14.4v9.6h-8.6L6 19.2v-3.4H4.8z" />
+        <path d="M8.6 10.2h6.8M8.6 12.8h4.4" />
+      </>
+    ),
+    theme: (
+      <>
+        <path d="M12 3.6a8.4 8.4 0 1 0 0 16.8c1.3 0 1.9-.8 1.9-1.6 0-.8-.5-1.2-.5-1.9 0-1 .8-1.8 2-1.8h1.7c1.9 0 3.2-1.5 3.2-3.3C20.3 6.8 16.6 3.6 12 3.6z" />
+        <circle cx="8.2" cy="9.2" r="0.9" fill="currentColor" stroke="none" />
+        <circle cx="12" cy="7.6" r="0.9" fill="currentColor" stroke="none" />
+        <circle cx="15.6" cy="9.6" r="0.9" fill="currentColor" stroke="none" />
+      </>
+    ),
+    gear: (
+      <>
+        <circle cx="12" cy="12" r="3" />
+        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+      </>
+    ),
+    edit: (
+      <>
+        <path d="M4.2 19.8l1-3.9L15.3 5.8l2.9 2.9L8.1 18.8z" />
+        <path d="M13.6 7.5l2.9 2.9" />
+      </>
+    ),
+    download: (
+      <>
+        <circle cx="12" cy="12" r="8.4" />
+        <path d="M12 7.8v7.4M8.9 12.3l3.1 3.1 3.1-3.1" />
+      </>
+    ),
+    info: (
+      <>
+        <circle cx="12" cy="12" r="8.4" />
+        <path d="M12 11v5.2" />
+        <circle cx="12" cy="8.1" r="0.9" fill="currentColor" stroke="none" />
+      </>
+    ),
+  };
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      {paths[name]}
+    </svg>
+  );
+}
+
 function TabIcon({ name }: { name: TabKey }) {
   const common = {
     viewBox: '0 0 24 24',
@@ -1070,7 +1148,7 @@ export function MineView(props: {
 
         <div class="mine-card">
           <button class="mine-row" onClick={props.onLogin}>
-            <span class="ic">☺</span>
+            <span class="ic"><MineIcon name="login" /></span>
             <span class="tx">
               <span class="t">登录</span>
               <span class="s">
@@ -1080,7 +1158,7 @@ export function MineView(props: {
             <span class="chev">›</span>
           </button>
           <button class="mine-row" onClick={props.onLibraryLogin}>
-            <span class="ic">▤</span>
+            <span class="ic"><MineIcon name="library" /></span>
             <span class="tx">
               <span class="t">图书馆登录</span>
               <span class="s">另一套账号（学号 + 图书馆密码）</span>
@@ -1088,7 +1166,7 @@ export function MineView(props: {
             <span class="chev">›</span>
           </button>
           <button class="mine-row" onClick={props.onRenew} disabled={props.renewBusy}>
-            <span class="ic">⟳</span>
+            <span class="ic"><MineIcon name="renew" /></span>
             <span class="tx">
               <span class="t">立即续期</span>
               <span class="s">{props.renewBusy ? '续期中…' : `教务 ${props.jwtText} · 验一次登录换新票`}</span>
@@ -1099,7 +1177,7 @@ export function MineView(props: {
 
         <div class="mine-card">
           <button class="mine-row" onClick={() => props.onToggleClass(!props.notifyClass)}>
-            <span class="ic">◕</span>
+            <span class="ic"><MineIcon name="alarm" /></span>
             <span class="tx">
               <span class="t">课前提醒</span>
               <span class="s">每节课开课前 30 分钟各弹一条</span>
@@ -1107,7 +1185,7 @@ export function MineView(props: {
             <span class={`sw${props.notifyClass ? ' on' : ''}`} />
           </button>
           <button class="mine-row" onClick={() => props.onToggleNews(!props.notifyNews)}>
-            <span class="ic">◑</span>
+            <span class="ic"><MineIcon name="bell" /></span>
             <span class="tx">
               <span class="t">资讯通知</span>
               <span class="s">有新通知时提醒一次</span>
@@ -1118,7 +1196,7 @@ export function MineView(props: {
 
         <div class="mine-card">
           <button class="mine-row" onClick={props.onTheme}>
-            <span class="ic">◐</span>
+            <span class="ic"><MineIcon name="theme" /></span>
             <span class="tx">
               <span class="t">外观</span>
               <span class="s">米白 / 藏青 / 蓝绿</span>
@@ -1127,7 +1205,7 @@ export function MineView(props: {
             <span class="chev">›</span>
           </button>
           <button class="mine-row" onClick={props.onSettings}>
-            <span class="ic">⚙</span>
+            <span class="ic"><MineIcon name="gear" /></span>
             <span class="tx">
               <span class="t">设置</span>
               <span class="s">服务商与模型、API Key、模型兜底</span>
@@ -1138,7 +1216,7 @@ export function MineView(props: {
 
         <div class="mine-card">
           <button class="mine-row" onClick={props.onSurvey}>
-            <span class="ic">✎</span>
+            <span class="ic"><MineIcon name="edit" /></span>
             <span class="tx">
               <span class="t">反馈与问卷</span>
               <span class="s">{props.surveyStatus}</span>
@@ -1146,7 +1224,7 @@ export function MineView(props: {
             <span class="chev">›</span>
           </button>
           <button class="mine-row" onClick={props.onCheckUpdate} disabled={props.checking}>
-            <span class="ic">⤓</span>
+            <span class="ic"><MineIcon name="download" /></span>
             <span class="tx">
               <span class="t">
                 检查更新
@@ -1163,7 +1241,7 @@ export function MineView(props: {
             <span class="chev">›</span>
           </button>
           <button class="mine-row" onClick={props.onAbout}>
-            <span class="ic">ⓘ</span>
+            <span class="ic"><MineIcon name="info" /></span>
             <span class="tx">
               <span class="t">关于</span>
               <span class="s">数据来源、隐私与致谢 · v{props.version}</span>
