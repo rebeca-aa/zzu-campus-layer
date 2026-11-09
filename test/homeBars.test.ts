@@ -126,7 +126,7 @@ describe('一卡通栏', () => {
   it('只认一条，标签缺省叫校园卡', () => {
     const out = normalizeHomeBars([{ kind: 'card' }, { kind: 'card' }, { label: 'x', text: 'y' }]);
     expect(out?.length).toBe(2);
-    expect(out?.[0]).toEqual({ id: CARD_HOME_BAR_ID, kind: 'card', label: '校园卡', text: '' });
+    expect(out?.[0]).toEqual({ id: CARD_HOME_BAR_ID, kind: 'card', label: '校园卡', text: '', builtin: true });
   });
 
   it('改 / 加都不影响一卡通', () => {

@@ -53,7 +53,7 @@ import {
 import { displayDayShanghai, msUntilMidnightShanghai, msUntilRollover, todayShanghai, weekOfDate } from '../src/core/util';
 import type { Term } from '../src/core/types';
 import { NoticeBoard } from '../src/ui/notice';
-import { HomeView, HueLine, LineSlider, MineView, ScheduleView, TabBar, WeatherView, type Caller, type TabKey } from './views';
+import { CompassView, HomeView, HueLine, LineSlider, MineView, ScheduleView, TabBar, WeatherView, type Caller, type TabKey } from './views';
 import { fetchRelease, isNewer, SEEN_KEY, shouldAnnounce, type Release } from './update';
 import {
   applyCustomVars,
@@ -1219,7 +1219,14 @@ const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
             unread={unread}
             onBell={openNotices}
             onRefresh={refreshHome}
-            onOpenSchedule={() => goTab('schedule')}
+            onOpenSchedule={() => {
+              setNavDir('fwd');
+              goTab('schedule');
+            }}
+            onCompass={() => {
+              setNavDir('fwd');
+              goTab('compass');
+            }}
             bars={homeBars}
             onBarsChange={patchHomeBars}
             onPickBar={(text) => {
@@ -1237,6 +1244,12 @@ const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
                 }
               : {})}
           />
+        </div>
+      )}
+
+      {tab === 'compass' && (
+        <div class="page-live" key="compass">
+          <CompassView onBack={() => goTab('home')} />
         </div>
       )}
 

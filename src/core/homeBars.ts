@@ -22,6 +22,8 @@ export interface HomeBar {
   label: string;
   /** 点下去要发给 AI 的那段话；一卡通栏不用 */
   text: string;
+  /** 出厂自带的那几条：主页上排成 2x2 的小块，用户自己加的仍是整行长条 */
+  builtin?: boolean;
 }
 
 export const HOME_BARS_KEY = 'homeBars';
@@ -62,12 +64,19 @@ export function isCardBar(bar: HomeBar): boolean {
 }
 
 export function createCardBar(): HomeBar {
-  return { id: CARD_HOME_BAR_ID, kind: 'card', label: CARD_HOME_BAR_LABEL, text: '' };
+  return { id: CARD_HOME_BAR_ID, kind: 'card', label: CARD_HOME_BAR_LABEL, text: '', builtin: true };
+}
+
+const DEFAULT_TEXTS = new Set(DEFAULT_HOME_BAR_TEXT.map((d) => d.text));
+
+/** 出厂自带的栏（图书馆 / 空教室 / 校园卡）：主页上按 2x2 排 */
+export function isBuiltinBar(bar: HomeBar): boolean {
+  return bar.builtin === true || isCardBar(bar) || DEFAULT_TEXTS.has(bar.text);
 }
 
 /** 全新安装时的三条：图书馆、空教室、一卡通 */
 export function defaultHomeBars(): HomeBar[] {
-  const bars = DEFAULT_HOME_BAR_TEXT.map((item) => ({ id: newHomeBarId(), label: item.label, text: item.text }));
+  const bars = DEFAULT_HOME_BAR_TEXT.map((item) => ({ id: newHomeBarId(), label: item.label, text: item.text, builtin: true }));
   return [...bars, createCardBar()];
 }
 
@@ -77,7 +86,7 @@ export function withDefaultHomeBars(items: HomeBar[]): HomeBar[] {
   for (const def of DEFAULT_HOME_BAR_TEXT) {
     if (chat.some((bar) => bar.text === def.text)) continue;
     if (chat.length >= MAX_HOME_BARS - 1) break;
-    chat.push({ id: newHomeBarId(), label: def.label, text: def.text });
+    chat.push({ id: newHomeBarId(), label: def.label, text: def.text, builtin: true });
   }
   return [...chat, createCardBar()];
 }
@@ -103,13 +112,14 @@ export function normalizeHomeBars(raw: unknown): HomeBar[] | undefined {
     let label = '';
     let text = '';
     let id = '';
+    let builtin = false;
     if (entry && typeof entry === 'object') {
       const o = entry as Record<string, unknown>;
       if (o.kind === 'card') {
         if (hasCard) continue;
         hasCard = true;
         label = oneLine(typeof o.label === 'string' ? o.label : '').slice(0, MAX_HOME_BAR_LABEL) || CARD_HOME_BAR_LABEL;
-        out.push({ id: typeof o.id === 'string' && o.id ? o.id : CARD_HOME_BAR_ID, kind: 'card', label, text: '' });
+        out.push({ id: typeof o.id === 'string' && o.id ? o.id : CARD_HOME_BAR_ID, kind: 'card', label, text: '', builtin: true });
         if (out.length >= MAX_HOME_BARS) break;
         continue;
       }
@@ -125,15 +135,17 @@ export function normalizeHomeBars(raw: unknown): HomeBar[] | undefined {
       text = rawText;
       label = rawLabel;
       if (typeof o.id === 'string') id = o.id;
+      if (o.builtin === true) builtin = true;
       if (!text) text = label;
       if (!label) label = text;
     }
     text = oneLine(text).slice(0, MAX_HOME_BAR_TEXT);
+    if (DEFAULT_TEXTS.has(text)) builtin = true;
     label = oneLine(label).slice(0, MAX_HOME_BAR_LABEL) || text.slice(0, MAX_HOME_BAR_LABEL);
     if (!text) continue;
     if (seen.has(text)) continue;
     seen.add(text);
-    out.push({ id: id || newHomeBarId(), label, text });
+    out.push({ id: id || newHomeBarId(), label, text, ...(builtin ? { builtin: true } : {}) });
     if (out.length >= MAX_HOME_BARS) break;
   }
   return out;

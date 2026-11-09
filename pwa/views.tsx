@@ -12,12 +12,13 @@ import {
   addHomeBar,
   createCardBar,
   isCardBar,
+  isBuiltinBar,
   setCardBarVisible,
   updateHomeBar,
   type HomeBar,
 } from '../src/core/homeBars';
 
-export type TabKey = 'home' | 'ai' | 'weather' | 'schedule' | 'mine';
+export type TabKey = 'home' | 'ai' | 'weather' | 'schedule' | 'compass' | 'mine';
 
 /** 一次工具调用的结果；失败时 ok=false，error 是给人看的一句话 */
 export type Caller = (name: string, args?: Record<string, unknown>) => Promise<{ ok: boolean; data?: any; error?: string }>;
@@ -163,7 +164,7 @@ function TabIcon({ name }: { name: TabKey }) {
 
 export function TabBar({ tab, onTab }: { tab: TabKey; onTab: (t: TabKey) => void }) {
   /* 课表页不是底部入口，但它是从主页点进来的，所以高亮仍然停在「主页」 */
-  const shown: TabKey = tab === 'schedule' ? 'home' : tab;
+  const shown: TabKey = tab === 'schedule' || tab === 'compass' ? 'home' : tab;
   return (
     <nav class="tabbar">
       {TABS.map((t) => (
@@ -225,6 +226,8 @@ export function HomeView(props: {
   onRefresh: () => void;
   /** 点课表卡片进本周课表页 */
   onOpenSchedule: () => void;
+  /** 点「指南针」小块进指南针页 */
+  onCompass: () => void;
   busy: boolean;
   /** 课表下面那几条自定义栏：点长条直接把话发给 AI；右侧小「+」打开设置窗，统一增删改 */
   bars: HomeBar[];
@@ -431,6 +434,7 @@ export function HomeView(props: {
           cardText={cardBal}
           cardBusy={cardBusy}
           onCardClick={loadCard}
+          onCompass={props.onCompass}
         />
 
         {props.survey && (
@@ -483,6 +487,67 @@ function draftOf(bars: HomeBar[]): BarDraft[] {
   });
 }
 
+type BarGlyphName = 'book' | 'room' | 'card' | 'compass' | 'chat';
+
+function BarGlyph({ name }: { name: BarGlyphName }) {
+  const common = {
+    viewBox: '0 0 24 24',
+    fill: 'none',
+    stroke: 'currentColor',
+    'stroke-width': '1.7',
+    'stroke-linecap': 'round' as const,
+    'stroke-linejoin': 'round' as const,
+    width: 20,
+    height: 20,
+    'aria-hidden': true,
+  };
+  if (name === 'book') {
+    return (
+      <svg {...common}>
+        <path d="M12 6.4c-1.5-1.3-3.5-2-5.9-2H4.4v13h1.7c2.4 0 4.4.7 5.9 2 1.5-1.3 3.5-2 5.9-2h1.7v-13h-1.7c-2.4 0-4.4.7-5.9 2z" />
+        <path d="M12 6.4v13" />
+      </svg>
+    );
+  }
+  if (name === 'room') {
+    return (
+      <svg {...common}>
+        <path d="M5 20V5.5A1.5 1.5 0 0 1 6.5 4h11A1.5 1.5 0 0 1 19 5.5V20" />
+        <path d="M4 20h16M9 9h.01M15 14h.01" />
+      </svg>
+    );
+  }
+  if (name === 'card') {
+    return (
+      <svg {...common}>
+        <rect x="3.5" y="5.5" width="17" height="13" rx="2.4" />
+        <path d="M3.5 10h17M7 14.5h4" />
+      </svg>
+    );
+  }
+  if (name === 'compass') {
+    return (
+      <svg {...common}>
+        <circle cx="12" cy="12" r="8.4" />
+        <path d="m14.9 9.1-1.7 4.1-4.1 1.7 1.7-4.1z" />
+        <circle cx="12" cy="12" r="0.8" fill="currentColor" stroke="none" />
+      </svg>
+    );
+  }
+  return (
+    <svg {...common}>
+      <path d="M4.8 6.2h14.4v9.6h-8.6L6 19.2v-3.4H4.8z" />
+    </svg>
+  );
+}
+
+/** 默认那几条按文案挑图标；用户改过文案就退回对话图标 */
+function barGlyphOf(bar: HomeBar): BarGlyphName {
+  if (bar.text.includes('图书馆')) return 'book';
+  if (bar.text.includes('教室')) return 'room';
+  return 'chat';
+}
+
 function HomeBars(props: {
   bars: HomeBar[];
   onChange: (next: HomeBar[]) => void;
@@ -491,10 +556,14 @@ function HomeBars(props: {
   cardText: string;
   cardBusy: boolean;
   onCardClick: () => void;
+  onCompass: () => void;
 }) {
   /* null = 设置窗关着；数组里是正在编辑的整份列表 */
   const [sheet, setSheet] = useState<BarDraft[] | null>(null);
   const [error, setError] = useState('');
+
+  const builtinBars = props.bars.filter(isBuiltinBar);
+  const customBars = props.bars.filter((bar) => !isBuiltinBar(bar));
 
   const openSheet = () => {
     setError('');
@@ -584,31 +653,59 @@ function HomeBars(props: {
           +
         </button>
       </div>
-      {props.bars.map((bar) =>
-        isCardBar(bar) ? (
-          <button
-            type="button"
-            class="bar bar-card"
-            key={bar.id}
-            onClick={props.onCardClick}
-            title="点一下刷新一卡通余额"
-          >
-            <span class="bar-t">{bar.label}</span>
-            <span class="bar-s">{props.cardBusy ? '正在查余额…' : props.cardText || '点一下查余额'}</span>
-          </button>
-        ) : (
-          <button
-            type="button"
-            class="bar"
-            key={bar.id}
-            onClick={() => props.onPick(bar.text)}
-            title={bar.text === bar.label ? undefined : bar.text}
-          >
-            <span class="bar-t">{bar.label}</span>
-            <span class="bar-s">{bar.text}</span>
-          </button>
-        ),
-      )}
+      <div class="bars-grid">
+        {builtinBars.map((bar) =>
+          isCardBar(bar) ? (
+            <button
+              type="button"
+              class="bar bar-card"
+              key={bar.id}
+              onClick={props.onCardClick}
+              title="点一下刷新一卡通余额"
+            >
+              <span class="bar-ic">
+                <BarGlyph name="card" />
+              </span>
+              <span class="bar-t">{bar.label}</span>
+              <span class="bar-s">{props.cardBusy ? '正在查余额…' : props.cardText || '点一下查余额'}</span>
+            </button>
+          ) : (
+            <button
+              type="button"
+              class="bar"
+              key={bar.id}
+              onClick={() => props.onPick(bar.text)}
+              title={bar.text === bar.label ? undefined : bar.text}
+            >
+              <span class="bar-ic">
+                <BarGlyph name={barGlyphOf(bar)} />
+              </span>
+              <span class="bar-t">{bar.label}</span>
+              <span class="bar-s">{bar.text}</span>
+            </button>
+          ),
+        )}
+        {/* 指南针固定占第四格，和图书馆 / 空教室 / 校园卡拼成 2x2 */}
+        <button type="button" class="bar bar-tile-compass" onClick={props.onCompass}>
+          <span class="bar-ic">
+            <BarGlyph name="compass" />
+          </span>
+          <span class="bar-t">指南针</span>
+          <span class="bar-s">看看哪边是北</span>
+        </button>
+      </div>
+      {customBars.map((bar) => (
+        <button
+          type="button"
+          class="bar"
+          key={bar.id}
+          onClick={() => props.onPick(bar.text)}
+          title={bar.text === bar.label ? undefined : bar.text}
+        >
+          <span class="bar-t">{bar.label}</span>
+          <span class="bar-s">{bar.text}</span>
+        </button>
+      ))}
       {props.bars.length === 0 ? (
         <p class="bars-empty">点右上角 + 加自定义栏，点一下就把话发给 AI。</p>
       ) : null}
@@ -1399,6 +1496,158 @@ export function WeatherView({ today }: { today: string }) {
         )}
 
         <p class="hint">天气数据来自 Open-Meteo，30 分钟更新一次；断网时显示上次结果。</p>
+      </main>
+    </>
+  );
+}
+
+/* ---------------- 指南针 ---------------- */
+
+const COMPASS_DIRS = ['北', '东北', '东', '东南', '南', '西南', '西', '西北'];
+
+function compassDir(deg: number): string {
+  return COMPASS_DIRS[Math.round((((deg % 360) + 360) % 360) / 45) % 8]!;
+}
+
+/** 表盘：刻度 + 北东南西 + 红蓝指针，整体按 -heading 旋转 */
+function CompassRose({ deg }: { deg: number }) {
+  const ticks = Array.from({ length: 24 }, (_, i) => {
+    const a = (i * 15 * Math.PI) / 180;
+    const major = i % 6 === 0;
+    const r1 = major ? 84 : 92;
+    return {
+      key: i,
+      x1: 120 + Math.sin(a) * r1,
+      y1: 120 - Math.cos(a) * r1,
+      x2: 120 + Math.sin(a) * 100,
+      y2: 120 - Math.cos(a) * 100,
+      major,
+    };
+  });
+  return (
+    <svg viewBox="0 0 240 240" class="compass-svg" aria-hidden="true">
+      <circle cx="120" cy="120" r="106" fill="none" stroke="currentColor" stroke-width="1" opacity=".16" />
+      <g transform={`rotate(${-deg} 120 120)`}>
+        {ticks.map((t) => (
+          <line
+            key={t.key}
+            x1={t.x1}
+            y1={t.y1}
+            x2={t.x2}
+            y2={t.y2}
+            stroke="currentColor"
+            stroke-width={t.major ? 2 : 1}
+            opacity={t.major ? 0.65 : 0.3}
+            stroke-linecap="round"
+          />
+        ))}
+        {['北', '东', '南', '西'].map((t, i) => {
+          const a = (i * 90 * Math.PI) / 180;
+          return (
+            <text
+              key={t}
+              x={120 + Math.sin(a) * 70}
+              y={120 - Math.cos(a) * 70}
+              text-anchor="middle"
+              dominant-baseline="central"
+              font-size="15"
+              fill="currentColor"
+              opacity={i === 0 ? 1 : 0.55}
+              font-weight={i === 0 ? 700 : 400}
+              transform={`rotate(${deg} ${120 + Math.sin(a) * 70} ${120 - Math.cos(a) * 70})`}
+            >
+              {t}
+            </text>
+          );
+        })}
+        <path d="M120 74 L126 120 L120 113 L114 120 Z" fill="var(--accent)" />
+        <path d="M120 166 L114 120 L120 127 L126 120 Z" fill="currentColor" opacity=".3" />
+      </g>
+      <path d="M120 8 L125 21 L115 21 Z" fill="var(--accent)" />
+    </svg>
+  );
+}
+
+export function CompassView({ onBack }: { onBack: () => void }) {
+  const [heading, setHeading] = useState<number | null>(null);
+  const [manual, setManual] = useState(0);
+  const [perm, setPerm] = useState<'unknown' | 'granted' | 'denied'>('unknown');
+  const drag = useRef<{ x: number; base: number } | null>(null);
+
+  useEffect(() => {
+    const onOrient = (e: DeviceOrientationEvent) => {
+      const w = (e as DeviceOrientationEvent & { webkitCompassHeading?: number }).webkitCompassHeading;
+      if (typeof w === 'number' && Number.isFinite(w)) setHeading(w);
+      else if (typeof e.alpha === 'number') setHeading((360 - e.alpha) % 360);
+    };
+    window.addEventListener('deviceorientationabsolute', onOrient as EventListener, true);
+    window.addEventListener('deviceorientation', onOrient as EventListener, true);
+    return () => {
+      window.removeEventListener('deviceorientationabsolute', onOrient as EventListener, true);
+      window.removeEventListener('deviceorientation', onOrient as EventListener, true);
+    };
+  }, []);
+
+  const needPerm =
+    typeof (DeviceOrientationEvent as unknown as { requestPermission?: () => Promise<string> }).requestPermission === 'function';
+  const askPerm = async () => {
+    try {
+      const req = (DeviceOrientationEvent as unknown as { requestPermission: () => Promise<string> }).requestPermission;
+      const r = await req();
+      setPerm(r === 'granted' ? 'granted' : 'denied');
+    } catch {
+      setPerm('denied');
+    }
+  };
+
+  const deg = heading ?? manual;
+
+  return (
+    <>
+      <div class="subhead">
+        <button
+          onClick={() => {
+            onBack();
+          }}
+        >
+          ‹ 返回
+        </button>
+        <strong>指南针</strong>
+      </div>
+      <main class="tabbody compass-page">
+        <div
+          class="compass-dial"
+          onPointerDown={(e) => {
+            drag.current = { x: e.clientX, base: manual };
+            (e.currentTarget as Element).setPointerCapture?.(e.pointerId);
+          }}
+          onPointerMove={(e) => {
+            if (!drag.current) return;
+            const next = ((drag.current.base - (e.clientX - drag.current.x) * 0.6) % 360 + 360) % 360;
+            setManual(next);
+          }}
+          onPointerUp={() => {
+            drag.current = null;
+          }}
+          onPointerCancel={() => {
+            drag.current = null;
+          }}
+        >
+          <CompassRose deg={deg} />
+        </div>
+        <div class="compass-read">
+          <b>{Math.round(deg)}°</b>
+          <span>{compassDir(deg)}</span>
+        </div>
+        {needPerm && perm !== 'granted' && (
+          <button type="button" class="primary" onClick={() => void askPerm()}>
+            允许使用方向传感器
+          </button>
+        )}
+        <p class="hint">
+          {heading !== null ? '手机平放，转动设备看指针。' : '这台设备没给方向数据，可以左右拖动表盘。'}
+          {perm === 'denied' ? '（方向权限被拒绝，可拖动表盘）' : ''}
+        </p>
       </main>
     </>
   );
