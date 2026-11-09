@@ -5,6 +5,7 @@ import type { Course, Term } from '../src/core/types';
 import { currentWeekOf, diffDays, shanghaiHour, weekdayOf } from '../src/core/util';
 import { ageText, readCache, writeCache } from '../src/core/offline';
 import { dressAdvice, dressAdviceFor, loadWeather, rainReminder, type Weather, type WeatherIconName } from '../src/core/weather';
+import { accuracyLevel, circularLerp, headingFromSample, type CompassSample } from '../src/core/compass';
 import {
   MAX_HOME_BARS,
   MAX_HOME_BAR_LABEL,
@@ -1572,24 +1573,59 @@ export function CompassView({ onBack }: { onBack: () => void }) {
   const [heading, setHeading] = useState<number | null>(null);
   const [manual, setManual] = useState(0);
   const [perm, setPerm] = useState<'unknown' | 'granted' | 'denied'>('unknown');
+  const [accuracy, setAccuracy] = useState<number | null>(null);
   const drag = useRef<{ x: number; base: number } | null>(null);
-
-  useEffect(() => {
-    const onOrient = (e: DeviceOrientationEvent) => {
-      const w = (e as DeviceOrientationEvent & { webkitCompassHeading?: number }).webkitCompassHeading;
-      if (typeof w === 'number' && Number.isFinite(w)) setHeading(w);
-      else if (typeof e.alpha === 'number') setHeading((360 - e.alpha) % 360);
-    };
-    window.addEventListener('deviceorientationabsolute', onOrient as EventListener, true);
-    window.addEventListener('deviceorientation', onOrient as EventListener, true);
-    return () => {
-      window.removeEventListener('deviceorientationabsolute', onOrient as EventListener, true);
-      window.removeEventListener('deviceorientation', onOrient as EventListener, true);
-    };
-  }, []);
 
   const needPerm =
     typeof (DeviceOrientationEvent as unknown as { requestPermission?: () => Promise<string> }).requestPermission === 'function';
+
+  const rawRef = useRef<number | null>(null);
+  const shownRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (needPerm && perm !== 'granted') return;
+    let alive = true;
+    let lastPaint = 0;
+    const onOrient = (e: DeviceOrientationEvent) => {
+      const h = headingFromSample(e as unknown as CompassSample);
+      if (h === null) return;
+      rawRef.current = h;
+      const acc = (e as unknown as CompassSample).webkitCompassAccuracy;
+      if (typeof acc === 'number') setAccuracy(acc);
+    };
+    const onVis = () => {
+      /* 切后台时丢掉旧值，回来重新收敛，避免一下子转半圈 */
+      if (document.hidden) rawRef.current = null;
+    };
+    window.addEventListener('deviceorientationabsolute', onOrient as EventListener, true);
+    window.addEventListener('deviceorientation', onOrient as EventListener, true);
+    document.addEventListener('visibilitychange', onVis);
+    let raf = 0;
+    const loop = (t: number) => {
+      if (!alive) return;
+      const raw = rawRef.current;
+      if (raw !== null && t - lastPaint > 60) {
+        lastPaint = t;
+        const prev = shownRef.current;
+        const next = prev === null ? raw : circularLerp(prev, raw, 0.3);
+        shownRef.current = next;
+        setHeading(next);
+      }
+      raf = requestAnimationFrame(loop);
+    };
+    raf = requestAnimationFrame(loop);
+    return () => {
+      alive = false;
+      cancelAnimationFrame(raf);
+      window.removeEventListener('deviceorientationabsolute', onOrient as EventListener, true);
+      window.removeEventListener('deviceorientation', onOrient as EventListener, true);
+      document.removeEventListener('visibilitychange', onVis);
+    };
+  }, [needPerm, perm]);
+
+  const accLevel = accuracyLevel(accuracy);
+
+
   const askPerm = async () => {
     try {
       const req = (DeviceOrientationEvent as unknown as { requestPermission: () => Promise<string> }).requestPermission;
@@ -1638,6 +1674,11 @@ export function CompassView({ onBack }: { onBack: () => void }) {
         <div class="compass-read">
           <b>{Math.round(deg)}°</b>
           <span>{compassDir(deg)}</span>
+          {accLevel && (
+            <em class={`compass-acc ${accLevel}`}>
+              精度{accLevel === 'good' ? '高' : accLevel === 'fair' ? '中' : '低'}
+            </em>
+          )}
         </div>
         {needPerm && perm !== 'granted' && (
           <button type="button" class="primary" onClick={() => void askPerm()}>
@@ -1647,6 +1688,7 @@ export function CompassView({ onBack }: { onBack: () => void }) {
         <p class="hint">
           {heading !== null ? '手机平放，转动设备看指针。' : '这台设备没给方向数据，可以左右拖动表盘。'}
           {perm === 'denied' ? '（方向权限被拒绝，可拖动表盘）' : ''}
+          {accLevel === 'poor' ? ' 精度偏低：拿着手机慢慢画个「8」字校准一下。' : ''}
         </p>
       </main>
     </>

@@ -1983,3 +1983,22 @@ html[data-theme='pink'] .grid .course .tag {
   color: var(--text);
   font-size: 17px;
 }
+
+.compass-acc {
+  margin-left: 4px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-style: normal;
+  color: var(--dim);
+  border: 1px solid var(--hairline);
+}
+
+.compass-acc.good {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+}
+
+.compass-acc.poor {
+  color: #e0a060;
+}
