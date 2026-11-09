@@ -5,7 +5,7 @@ import type { Course, Term } from '../src/core/types';
 import { currentWeekOf, diffDays, shanghaiHour, weekdayOf } from '../src/core/util';
 import { ageText, readCache, writeCache } from '../src/core/offline';
 import { dressAdvice, dressAdviceFor, loadWeather, rainReminder, type Weather, type WeatherIconName } from '../src/core/weather';
-import { accuracyLevel, circularLerp, headingFromSample, type CompassSample } from '../src/core/compass';
+import { addMemo, loadMemos, removeMemo, saveMemos, updateMemo, type Memo } from '../src/core/memo';
 import {
   MAX_HOME_BARS,
   MAX_HOME_BAR_LABEL,
@@ -19,7 +19,7 @@ import {
   type HomeBar,
 } from '../src/core/homeBars';
 
-export type TabKey = 'home' | 'ai' | 'weather' | 'schedule' | 'compass' | 'mine';
+export type TabKey = 'home' | 'ai' | 'weather' | 'schedule' | 'memo' | 'mine';
 
 /** 一次工具调用的结果；失败时 ok=false，error 是给人看的一句话 */
 export type Caller = (name: string, args?: Record<string, unknown>) => Promise<{ ok: boolean; data?: any; error?: string }>;
@@ -165,7 +165,7 @@ function TabIcon({ name }: { name: TabKey }) {
 
 export function TabBar({ tab, onTab }: { tab: TabKey; onTab: (t: TabKey) => void }) {
   /* 课表页不是底部入口，但它是从主页点进来的，所以高亮仍然停在「主页」 */
-  const shown: TabKey = tab === 'schedule' || tab === 'compass' ? 'home' : tab;
+  const shown: TabKey = tab === 'schedule' || tab === 'memo' ? 'home' : tab;
   return (
     <nav class="tabbar">
       {TABS.map((t) => (
@@ -227,8 +227,8 @@ export function HomeView(props: {
   onRefresh: () => void;
   /** 点课表卡片进本周课表页 */
   onOpenSchedule: () => void;
-  /** 点「指南针」小块进指南针页 */
-  onCompass: () => void;
+  /** 点「备忘录」小块进备忘录页 */
+  onMemo: () => void;
   busy: boolean;
   /** 课表下面那几条自定义栏：点长条直接把话发给 AI；右侧小「+」打开设置窗，统一增删改 */
   bars: HomeBar[];
@@ -435,7 +435,7 @@ export function HomeView(props: {
           cardText={cardBal}
           cardBusy={cardBusy}
           onCardClick={loadCard}
-          onCompass={props.onCompass}
+          onMemo={props.onMemo}
         />
 
         {props.survey && (
@@ -488,7 +488,7 @@ function draftOf(bars: HomeBar[]): BarDraft[] {
   });
 }
 
-type BarGlyphName = 'book' | 'room' | 'card' | 'compass' | 'chat';
+type BarGlyphName = 'book' | 'room' | 'card' | 'memo' | 'chat';
 
 function BarGlyph({ name }: { name: BarGlyphName }) {
   const common = {
@@ -526,12 +526,11 @@ function BarGlyph({ name }: { name: BarGlyphName }) {
       </svg>
     );
   }
-  if (name === 'compass') {
+  if (name === 'memo') {
     return (
       <svg {...common}>
-        <circle cx="12" cy="12" r="8.4" />
-        <path d="m14.9 9.1-1.7 4.1-4.1 1.7 1.7-4.1z" />
-        <circle cx="12" cy="12" r="0.8" fill="currentColor" stroke="none" />
+        <rect x="5" y="3.8" width="14" height="16.4" rx="2.2" />
+        <path d="M9 8h6M9 12h6M9 16h4" />
       </svg>
     );
   }
@@ -557,7 +556,7 @@ function HomeBars(props: {
   cardText: string;
   cardBusy: boolean;
   onCardClick: () => void;
-  onCompass: () => void;
+  onMemo: () => void;
 }) {
   /* null = 设置窗关着；数组里是正在编辑的整份列表 */
   const [sheet, setSheet] = useState<BarDraft[] | null>(null);
@@ -686,13 +685,13 @@ function HomeBars(props: {
             </button>
           ),
         )}
-        {/* 指南针固定占第四格，和图书馆 / 空教室 / 校园卡拼成 2x2 */}
-        <button type="button" class="bar bar-tile-compass" onClick={props.onCompass}>
+        {/* 备忘录固定占第四格，和图书馆 / 空教室 / 校园卡拼成 2x2 */}
+        <button type="button" class="bar bar-tile-memo" onClick={props.onMemo}>
           <span class="bar-ic">
-            <BarGlyph name="compass" />
+            <BarGlyph name="memo" />
           </span>
-          <span class="bar-t">指南针</span>
-          <span class="bar-s">看看哪边是北</span>
+          <span class="bar-t">备忘录</span>
+          <span class="bar-s">记点东西</span>
         </button>
       </div>
       {customBars.map((bar) => (
@@ -1502,200 +1501,126 @@ export function WeatherView({ today }: { today: string }) {
   );
 }
 
-/* ---------------- 指南针 ---------------- */
+/* ---------------- 备忘录 ---------------- */
 
-const COMPASS_DIRS = ['北', '东北', '东', '东南', '南', '西南', '西', '西北'];
-
-function compassDir(deg: number): string {
-  return COMPASS_DIRS[Math.round((((deg % 360) + 360) % 360) / 45) % 8]!;
+function memoTime(ts: number): string {
+  const d = new Date(ts);
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${p(d.getMonth() + 1)}/${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 
-/** 表盘：刻度 + 北东南西 + 红蓝指针，整体按 -heading 旋转 */
-function CompassRose({ deg }: { deg: number }) {
-  const ticks = Array.from({ length: 24 }, (_, i) => {
-    const a = (i * 15 * Math.PI) / 180;
-    const major = i % 6 === 0;
-    const r1 = major ? 84 : 92;
-    return {
-      key: i,
-      x1: 120 + Math.sin(a) * r1,
-      y1: 120 - Math.cos(a) * r1,
-      x2: 120 + Math.sin(a) * 100,
-      y2: 120 - Math.cos(a) * 100,
-      major,
-    };
-  });
-  return (
-    <svg viewBox="0 0 240 240" class="compass-svg" aria-hidden="true">
-      <circle cx="120" cy="120" r="106" fill="none" stroke="currentColor" stroke-width="1" opacity=".16" />
-      <g transform={`rotate(${-deg} 120 120)`}>
-        {ticks.map((t) => (
-          <line
-            key={t.key}
-            x1={t.x1}
-            y1={t.y1}
-            x2={t.x2}
-            y2={t.y2}
-            stroke="currentColor"
-            stroke-width={t.major ? 2 : 1}
-            opacity={t.major ? 0.65 : 0.3}
-            stroke-linecap="round"
-          />
-        ))}
-        {['北', '东', '南', '西'].map((t, i) => {
-          const a = (i * 90 * Math.PI) / 180;
-          return (
-            <text
-              key={t}
-              x={120 + Math.sin(a) * 70}
-              y={120 - Math.cos(a) * 70}
-              text-anchor="middle"
-              dominant-baseline="central"
-              font-size="15"
-              fill="currentColor"
-              opacity={i === 0 ? 1 : 0.55}
-              font-weight={i === 0 ? 700 : 400}
-              transform={`rotate(${deg} ${120 + Math.sin(a) * 70} ${120 - Math.cos(a) * 70})`}
-            >
-              {t}
-            </text>
-          );
-        })}
-        <path d="M120 74 L126 120 L120 113 L114 120 Z" fill="var(--accent)" />
-        <path d="M120 166 L114 120 L120 127 L126 120 Z" fill="currentColor" opacity=".3" />
-      </g>
-      <path d="M120 8 L125 21 L115 21 Z" fill="var(--accent)" />
-    </svg>
-  );
-}
-
-export function CompassView({ onBack }: { onBack: () => void }) {
-  const [heading, setHeading] = useState<number | null>(null);
-  const [manual, setManual] = useState(0);
-  const [perm, setPerm] = useState<'unknown' | 'granted' | 'denied'>('unknown');
-  const [accuracy, setAccuracy] = useState<number | null>(null);
-  const drag = useRef<{ x: number; base: number } | null>(null);
-
-  const needPerm =
-    typeof (DeviceOrientationEvent as unknown as { requestPermission?: () => Promise<string> }).requestPermission === 'function';
-
-  const rawRef = useRef<number | null>(null);
-  const shownRef = useRef<number | null>(null);
+export function MemoView({ onBack }: { onBack: () => void }) {
+  const [memos, setMemos] = useState<Memo[] | null>(null);
+  const [draft, setDraft] = useState('');
+  const [editing, setEditing] = useState<string | null>(null);
 
   useEffect(() => {
-    if (needPerm && perm !== 'granted') return;
     let alive = true;
-    let lastPaint = 0;
-    const onOrient = (e: DeviceOrientationEvent) => {
-      const h = headingFromSample(e as unknown as CompassSample);
-      if (h === null) return;
-      rawRef.current = h;
-      const acc = (e as unknown as CompassSample).webkitCompassAccuracy;
-      if (typeof acc === 'number') setAccuracy(acc);
-    };
-    const onVis = () => {
-      /* 切后台时丢掉旧值，回来重新收敛，避免一下子转半圈 */
-      if (document.hidden) rawRef.current = null;
-    };
-    window.addEventListener('deviceorientationabsolute', onOrient as EventListener, true);
-    window.addEventListener('deviceorientation', onOrient as EventListener, true);
-    document.addEventListener('visibilitychange', onVis);
-    let raf = 0;
-    const loop = (t: number) => {
-      if (!alive) return;
-      const raw = rawRef.current;
-      if (raw !== null && t - lastPaint > 60) {
-        lastPaint = t;
-        const prev = shownRef.current;
-        const next = prev === null ? raw : circularLerp(prev, raw, 0.3);
-        shownRef.current = next;
-        setHeading(next);
-      }
-      raf = requestAnimationFrame(loop);
-    };
-    raf = requestAnimationFrame(loop);
+    void (async () => {
+      const list = await loadMemos();
+      if (alive) setMemos(list);
+    })();
     return () => {
       alive = false;
-      cancelAnimationFrame(raf);
-      window.removeEventListener('deviceorientationabsolute', onOrient as EventListener, true);
-      window.removeEventListener('deviceorientation', onOrient as EventListener, true);
-      document.removeEventListener('visibilitychange', onVis);
     };
-  }, [needPerm, perm]);
+  }, []);
 
-  const accLevel = accuracyLevel(accuracy);
-
-
-  const askPerm = async () => {
-    try {
-      const req = (DeviceOrientationEvent as unknown as { requestPermission: () => Promise<string> }).requestPermission;
-      const r = await req();
-      setPerm(r === 'granted' ? 'granted' : 'denied');
-    } catch {
-      setPerm('denied');
-    }
+  const commit = (next: Memo[]) => {
+    setMemos(next);
+    void saveMemos(next);
   };
 
-  const deg = heading ?? manual;
+  const save = () => {
+    const text = draft.trim();
+    if (!text) return;
+    if (editing) {
+      commit(updateMemo(memos ?? [], editing, text));
+      setEditing(null);
+    } else {
+      commit(addMemo(memos ?? [], text));
+    }
+    setDraft('');
+  };
+
+  const startEdit = (m: Memo) => {
+    setEditing(m.id);
+    setDraft(m.text);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const del = (m: Memo) => {
+    if (!window.confirm('删除这条备忘？')) return;
+    commit(removeMemo(memos ?? [], m.id));
+    if (editing === m.id) {
+      setEditing(null);
+      setDraft('');
+    }
+  };
 
   return (
     <>
       <div class="subhead">
-        <button
-          onClick={() => {
-            onBack();
-          }}
-        >
-          ‹ 返回
-        </button>
-        <strong>指南针</strong>
+        <button onClick={onBack}>‹ 返回</button>
+        <strong>备忘录</strong>
+        <span class="memo-count">{memos?.length ?? 0} 条</span>
       </div>
-      <main class="tabbody compass-page">
-        <div
-          class="compass-dial"
-          onPointerDown={(e) => {
-            drag.current = { x: e.clientX, base: manual };
-            (e.currentTarget as Element).setPointerCapture?.(e.pointerId);
-          }}
-          onPointerMove={(e) => {
-            if (!drag.current) return;
-            const next = ((drag.current.base - (e.clientX - drag.current.x) * 0.6) % 360 + 360) % 360;
-            setManual(next);
-          }}
-          onPointerUp={() => {
-            drag.current = null;
-          }}
-          onPointerCancel={() => {
-            drag.current = null;
-          }}
-        >
-          <CompassRose deg={deg} />
-        </div>
-        <div class="compass-read">
-          <b>{Math.round(deg)}°</b>
-          <span>{compassDir(deg)}</span>
-          {accLevel && (
-            <em class={`compass-acc ${accLevel}`}>
-              精度{accLevel === 'good' ? '高' : accLevel === 'fair' ? '中' : '低'}
-            </em>
-          )}
-        </div>
-        {needPerm && perm !== 'granted' && (
-          <button type="button" class="primary" onClick={() => void askPerm()}>
-            允许使用方向传感器
-          </button>
-        )}
-        <p class="hint">
-          {heading !== null ? '手机平放，转动设备看指针。' : '这台设备没给方向数据，可以左右拖动表盘。'}
-          {perm === 'denied' ? '（方向权限被拒绝，可拖动表盘）' : ''}
-          {accLevel === 'poor' ? ' 精度偏低：拿着手机慢慢画个「8」字校准一下。' : ''}
-        </p>
+      <main class="tabbody memo-page">
+        <section class="card memo-new">
+          <textarea
+            class="memo-input"
+            rows={3}
+            maxLength={1000}
+            placeholder="记点什么，比如：周五前交实验报告"
+            value={draft}
+            onInput={(e) => setDraft((e.target as HTMLTextAreaElement).value)}
+          />
+          <div class="memo-acts">
+            <span>{draft.length}/1000</span>
+            {editing && (
+              <button
+                class="ghost"
+                onClick={() => {
+                  setEditing(null);
+                  setDraft('');
+                }}
+              >
+                取消
+              </button>
+            )}
+            <button class="primary" disabled={!draft.trim()} onClick={save}>
+              {editing ? '保存修改' : '添加'}
+            </button>
+          </div>
+        </section>
+
+        {memos === null ? <p class="empty-line">正在读…</p> : null}
+        {memos && memos.length === 0 ? (
+          <p class="empty-line">还没有记录，上面写一条试试。</p>
+        ) : null}
+        {memos && memos.length > 0 ? (
+          <section class="card memo-list">
+            {memos.map((m) => (
+              <div class={`memo-item${editing === m.id ? ' on' : ''}`} key={m.id}>
+                <p class="memo-text">{m.text}</p>
+                <div class="memo-meta">
+                  <span>{memoTime(m.updatedAt)}</span>
+                  <button type="button" class="ghost" onClick={() => startEdit(m)}>
+                    编辑
+                  </button>
+                  <button type="button" class="ghost danger" onClick={() => del(m)}>
+                    删除
+                  </button>
+                </div>
+              </div>
+            ))}
+          </section>
+        ) : null}
       </main>
     </>
   );
 }
 
-/* ---------------- 我的 ---------------- */
+/* ---------------- 我的 ---------------- *//* ---------------- 我的 ---------------- */
 
 function remindSub(on: boolean, next?: string, exactWarn?: boolean): string {
   if (!on) return '每节课开课前 30 分钟各弹一条';
