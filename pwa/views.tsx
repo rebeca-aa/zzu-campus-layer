@@ -7,6 +7,17 @@ import { ageText, readCache, writeCache } from '../src/core/offline';
 import { dressAdvice, dressAdviceFor, loadWeather, rainReminder, type Weather, type WeatherIconName } from '../src/core/weather';
 import { addMemo, loadMemos, removeMemo, saveMemos, updateMemo, type Memo } from '../src/core/memo';
 import {
+  dueText,
+  homeworkState,
+  homeworkStats,
+  parseHomework,
+  remainText,
+  type HomeworkDraft,
+  type HomeworkItem,
+  type HomeworkRemind,
+  type HomeworkSettings,
+} from '../src/core/homework';
+import {
   MAX_HOME_BARS,
   MAX_HOME_BAR_LABEL,
   MAX_HOME_BAR_TEXT,
@@ -229,6 +240,9 @@ export function HomeView(props: {
   onOpenSchedule: () => void;
   /** 点「备忘录」小块进备忘录页 */
   onMemo: () => void;
+  /** 作业块：一行文案 + 逾期红点；点进作业页 */
+  hw?: { text: string; dot?: boolean } | null;
+  onHomework: () => void;
   busy: boolean;
   /** 课表下面那几条自定义栏：点长条直接把话发给 AI；右侧小「+」打开设置窗，统一增删改 */
   bars: HomeBar[];
@@ -436,6 +450,9 @@ export function HomeView(props: {
           cardBusy={cardBusy}
           onCardClick={loadCard}
           onMemo={props.onMemo}
+          hwText={props.hw?.text ?? '还没作业'}
+          hwDot={Boolean(props.hw?.dot)}
+          onHomework={props.onHomework}
         />
 
         {props.survey && (
@@ -488,7 +505,7 @@ function draftOf(bars: HomeBar[]): BarDraft[] {
   });
 }
 
-type BarGlyphName = 'book' | 'room' | 'card' | 'memo' | 'chat';
+type BarGlyphName = 'book' | 'room' | 'card' | 'memo' | 'chat' | 'hw';
 
 function BarGlyph({ name }: { name: BarGlyphName }) {
   const common = {
@@ -526,6 +543,15 @@ function BarGlyph({ name }: { name: BarGlyphName }) {
       </svg>
     );
   }
+  if (name === 'hw') {
+    return (
+      <svg {...common}>
+        <rect x="4.6" y="4.6" width="14.8" height="15" rx="2.2" />
+        <path d="M8.6 4.6V3.4h6.8v1.2" />
+        <path d="M8.4 12.4l2 2 4.2-4.4" />
+      </svg>
+    );
+  }
   if (name === 'memo') {
     return (
       <svg {...common}>
@@ -557,6 +583,10 @@ function HomeBars(props: {
   cardBusy: boolean;
   onCardClick: () => void;
   onMemo: () => void;
+  /** 作业：一行文字 + 逾期红点 */
+  hwText: string;
+  hwDot: boolean;
+  onHomework: () => void;
 }) {
   /* null = 设置窗关着；数组里是正在编辑的整份列表 */
   const [sheet, setSheet] = useState<BarDraft[] | null>(null);
@@ -692,6 +722,15 @@ function HomeBars(props: {
           </span>
           <span class="bar-t">备忘录</span>
           <span class="bar-s">记点东西</span>
+        </button>
+        {/* 作业横着占满一行：截止时间比数字重要，一行足够放「3 份待交 · 最近 11-16」 */}
+        <button type="button" class={`bar bar-tile-hw${props.hwDot ? ' alert' : ''}`} onClick={props.onHomework}>
+          {props.hwDot ? <span class="bar-dot" /> : null}
+          <span class="bar-ic">
+            <BarGlyph name="hw" />
+          </span>
+          <span class="bar-t">作业</span>
+          <span class="bar-s">{props.hwText}</span>
         </button>
       </div>
       {customBars.map((bar) => (
@@ -1940,3 +1979,376 @@ function RefreshIcon() {
     </svg>
   );
 }
+
+export interface HomeworkViewProps {
+  items: HomeworkItem[];
+  settings: HomeworkSettings;
+  /** 一行提示（导入成功、删掉几条之类），由外面给，页面只负责显示 */
+  note?: string;
+  onAdd: (drafts: HomeworkDraft[]) => void;
+  onToggle: (id: string) => void;
+  onRemove: (id: string) => void;
+  onImport: (code: string, mode: 'replace' | 'merge') => void;
+  onExport: () => void;
+  onSaveSettings: (next: HomeworkSettings) => void;
+}
+
+const WD = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
+
+/** 把 datetime-local 的值（2026-11-16T22:00）变成毫秒 */
+function localToMs(v: string): number {
+  const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(v);
+  if (!m) return Number.NaN;
+  return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]), Number(m[4]), Number(m[5])).getTime();
+}
+
+function toLocalInput(ms: number): string {
+  const d = new Date(ms);
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+export function HomeworkView(props: HomeworkViewProps) {
+  const now = Date.now();
+  const [paste, setPaste] = useState('');
+  const [drafts, setDrafts] = useState<HomeworkDraft[] | null>(null);
+  const [manual, setManual] = useState({ title: '', course: '', due: '' });
+  const [manualOpen, setManualOpen] = useState(false);
+  const [code, setCode] = useState('');
+  const [showDone, setShowDone] = useState(false);
+  const [adv, setAdv] = useState(false);
+
+  const stats = useMemo(() => homeworkStats(props.items, now), [props.items, now]);
+  const todo = useMemo(() => props.items.filter((x) => !x.doneAt), [props.items]);
+  const done = useMemo(() => props.items.filter((x) => x.doneAt).reverse(), [props.items]);
+  const remind = props.settings.remind;
+
+  const doParse = () => {
+    const list = parseHomework(paste, Date.now());
+    if (!list.length) return;
+    setDrafts(list);
+  };
+
+  const addDrafts = (list: HomeworkDraft[]) => {
+    props.onAdd(list);
+    setDrafts(null);
+    setPaste('');
+  };
+
+  const patchRemind = (patch: Partial<HomeworkRemind>) => {
+    props.onSaveSettings({ ...props.settings, remind: { ...remind, ...patch } });
+  };
+
+  return (
+    <div class="hw-page">
+      <div class="hw-chips">
+        <button class="hw-chip" onClick={() => setShowDone(false)}>
+          <b>{stats.todo}</b>
+          <span>待交</span>
+        </button>
+        <button class="hw-chip" onClick={() => setShowDone(false)}>
+          <b class={stats.overdue ? 'bad' : ''}>{stats.overdue}</b>
+          <span>已逾期</span>
+        </button>
+        <div class="hw-chip flat">
+          <b>{stats.rate}%</b>
+          <span>完成率</span>
+        </div>
+      </div>
+
+      {props.note && <p class="hint">{props.note}</p>}
+
+      <section class="card hw-card">
+        <div class="hw-head">
+          <strong>待交</strong>
+          <span>{todo.length ? `按截止时间排，最早 ${dueText(todo[0]!.dueAt, now)}` : '都交了'}</span>
+        </div>
+        {todo.length === 0 ? (
+          <p class="hint">{props.items.length ? '全交完了，去休息。' : '还没有作业：把群里的消息粘到下面，或者手动加一条。'}</p>
+        ) : (
+          <ul class="hw-list">
+            {todo.map((h) => (
+              <li key={h.id} class={`hw-row ${homeworkState(h, now)}`}>
+                <div class="hw-main">
+                  <div class="hw-title">{h.title}</div>
+                  <div class="hw-sub">
+                    {h.course ? `${h.course} · ` : ''}
+                    {dueText(h.dueAt, now)}
+                    <span class={`hw-remain ${homeworkState(h, now)}`}>{remainText(h, now)}</span>
+                  </div>
+                  {h.note && <div class="hw-note">{h.note}</div>}
+                </div>
+                <div class="hw-acts">
+                  <button class="mini" onClick={() => props.onToggle(h.id)}>
+                    提交
+                  </button>
+                  <button class="mini ghost" onClick={() => props.onRemove(h.id)} aria-label="删掉">
+                    ×
+                  </button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      <section class="card hw-card">
+        <div class="hw-head">
+          <strong>添加</strong>
+          <span>粘一段群消息，或者手动填</span>
+        </div>
+        <textarea
+          class="hw-paste"
+          rows={3}
+          placeholder="例如：@所有人 高数作业：习题册 3.1–3.4 周五前交，纸质交到学委那儿"
+          value={paste}
+          onInput={(e) => setPaste((e.currentTarget as HTMLTextAreaElement).value)}
+        />
+        <div class="hw-acts-row">
+          <button class="primary" disabled={!paste.trim()} onClick={doParse}>
+            识别
+          </button>
+          <button class="ghost" onClick={() => setManualOpen((v) => !v)}>
+            {manualOpen ? '收起手填' : '手动填'}
+          </button>
+        </div>
+
+        {manualOpen && (
+          <div class="hw-manual">
+            <label class="hw-field">
+              <span>内容</span>
+              <input
+                value={manual.title}
+                placeholder="习题册 3.1–3.4"
+                onInput={(e) => setManual({ ...manual, title: (e.currentTarget as HTMLInputElement).value })}
+              />
+            </label>
+            <label class="hw-field">
+              <span>课程</span>
+              <input
+                value={manual.course}
+                placeholder="可留空"
+                onInput={(e) => setManual({ ...manual, course: (e.currentTarget as HTMLInputElement).value })}
+              />
+            </label>
+            <label class="hw-field">
+              <span>截止</span>
+              <input
+                type="datetime-local"
+                value={manual.due}
+                onInput={(e) => setManual({ ...manual, due: (e.currentTarget as HTMLInputElement).value })}
+              />
+            </label>
+            <button
+              class="primary wide"
+              disabled={!manual.title.trim() || !manual.due}
+              onClick={() => {
+                const dueAt = localToMs(manual.due);
+                if (!Number.isFinite(dueAt)) return;
+                addDrafts([{ title: manual.title, ...(manual.course.trim() ? { course: manual.course.trim() } : {}), dueAt }]);
+                setManual({ title: '', course: '', due: '' });
+                setManualOpen(false);
+              }}
+            >
+              加进清单
+            </button>
+          </div>
+        )}
+
+        {drafts && drafts.length > 0 && (
+          <div class="hw-drafts">
+            <div class="hw-head">
+              <strong>识别到 {drafts.length} 条</strong>
+              <span>不对就改，或先删掉不要的</span>
+            </div>
+            {drafts.map((d, i) => (
+              <div class="hw-draft" key={`${d.title}-${i}`}>
+                <input
+                  value={d.title}
+                  onInput={(e) => {
+                    const next = drafts.slice();
+                    next[i] = { ...d, title: (e.currentTarget as HTMLInputElement).value };
+                    setDrafts(next);
+                  }}
+                />
+                <div class="hw-draft-sub">
+                  <input
+                    class="hw-course"
+                    value={d.course ?? ''}
+                    placeholder="课程"
+                    onInput={(e) => {
+                      const next = drafts.slice();
+                      const v = (e.currentTarget as HTMLInputElement).value;
+                      next[i] = { ...d, ...(v.trim() ? { course: v } : {}) };
+                      setDrafts(next);
+                    }}
+                  />
+                  <input
+                    type="datetime-local"
+                    value={toLocalInput(d.dueAt)}
+                    onInput={(e) => {
+                      const next = drafts.slice();
+                      const ms = localToMs((e.currentTarget as HTMLInputElement).value);
+                      if (Number.isFinite(ms)) next[i] = { ...d, dueAt: ms };
+                      setDrafts(next);
+                    }}
+                  />
+                  <button class="mini ghost" onClick={() => setDrafts(drafts.filter((_, j) => j !== i))}>
+                    ×
+                  </button>
+                </div>
+              </div>
+            ))}
+            <div class="hw-acts-row">
+              <button class="primary" onClick={() => addDrafts(drafts)}>
+                全加进清单
+              </button>
+              <button class="ghost" onClick={() => setDrafts(null)}>
+                不要了
+              </button>
+            </div>
+          </div>
+        )}
+      </section>
+
+      <section class="card hw-card">
+        <div class="hw-head">
+          <strong>班里共享</strong>
+          <span>学委发一串码，粘进来就能同步</span>
+        </div>
+        <textarea
+          class="hw-paste"
+          rows={2}
+          placeholder="粘学委发的作业码"
+          value={code}
+          onInput={(e) => setCode((e.currentTarget as HTMLTextAreaElement).value)}
+        />
+        <div class="hw-acts-row">
+          <button class="primary" disabled={!code.trim()} onClick={() => props.onImport(code, 'merge')}>
+            合并
+          </button>
+          <button class="ghost" disabled={!code.trim()} onClick={() => props.onImport(code, 'replace')}>
+            覆盖
+          </button>
+          <button class="ghost" onClick={props.onExport}>
+            我的作业码
+          </button>
+        </div>
+        {props.settings.lastImport && (
+          <p class="hint">
+            上次导入：{dueText(props.settings.lastImport.at, now)}
+            {props.settings.lastImport.from ? ` · ${props.settings.lastImport.from}` : ''}
+          </p>
+        )}
+      </section>
+
+      <section class="card hw-card">
+        <div class="hw-head">
+          <strong>提醒</strong>
+          <button class="mini ghost" onClick={() => setAdv((v) => !v)}>
+            {adv ? '收起' : '改时间'}
+          </button>
+        </div>
+        <button class="hw-set" onClick={() => patchRemind({ prev: !remind.prev })}>
+          <span>前一天</span>
+          <span class="hw-set-v">{String(remind.prevHour).padStart(2, '0')}:00</span>
+          <span class={`sw${remind.prev ? ' on' : ''}`} />
+        </button>
+        <button class="hw-set" onClick={() => patchRemind({ sameDay: !remind.sameDay })}>
+          <span>当天</span>
+          <span class="hw-set-v">{String(remind.sameDayHour).padStart(2, '0')}:00</span>
+          <span class={`sw${remind.sameDay ? ' on' : ''}`} />
+        </button>
+        <button class="hw-set" onClick={() => patchRemind({ soon: !remind.soon })}>
+          <span>到期前</span>
+          <span class="hw-set-v">{remind.soonHours} 小时</span>
+          <span class={`sw${remind.soon ? ' on' : ''}`} />
+        </button>
+        {adv && (
+          <div class="hw-manual">
+            <label class="hw-field">
+              <span>前一天几点</span>
+              <input
+                type="number"
+                min={0}
+                max={23}
+                value={remind.prevHour}
+                onInput={(e) => patchRemind({ prevHour: Number((e.currentTarget as HTMLInputElement).value) })}
+              />
+            </label>
+            <label class="hw-field">
+              <span>当天几点</span>
+              <input
+                type="number"
+                min={0}
+                max={23}
+                value={remind.sameDayHour}
+                onInput={(e) => patchRemind({ sameDayHour: Number((e.currentTarget as HTMLInputElement).value) })}
+              />
+            </label>
+            <label class="hw-field">
+              <span>到期前几小时</span>
+              <input
+                type="number"
+                min={1}
+                max={24}
+                value={remind.soonHours}
+                onInput={(e) => patchRemind({ soonHours: Number((e.currentTarget as HTMLInputElement).value) })}
+              />
+            </label>
+            <label class="hw-field">
+              <span>每周汇总</span>
+              <select
+                value={remind.summaryWeekday === null ? -1 : remind.summaryWeekday}
+                onChange={(e) => {
+                  const v = Number((e.currentTarget as HTMLSelectElement).value);
+                  patchRemind({ summaryWeekday: v < 0 ? null : v });
+                }}
+              >
+                <option value={-1}>不汇总</option>
+                {WD.map((w, i) => (
+                  <option value={i}>{`${w}晚上`}</option>
+                ))}
+              </select>
+            </label>
+          </div>
+        )}
+        <p class="hint">逾期之后不再催；提交了就把闹钟撤掉。</p>
+      </section>
+
+      <section class="card hw-card">
+        <button class="hw-set" onClick={() => setShowDone((v) => !v)}>
+          <span>已完成</span>
+          <span class="hw-set-v">{done.length} 条</span>
+          <span class="mini ghost">{showDone ? '收起' : '看看'}</span>
+        </button>
+        {showDone &&
+          (done.length === 0 ? (
+            <p class="hint">还没有提交过的作业。</p>
+          ) : (
+            <ul class="hw-list">
+              {done.map((h) => (
+                <li key={h.id} class="hw-row done">
+                  <div class="hw-main">
+                    <div class="hw-title">{h.title}</div>
+                    <div class="hw-sub">
+                      {h.course ? `${h.course} · ` : ''}
+                      交于 {dueText(h.doneAt ?? 0, now)}
+                    </div>
+                  </div>
+                  <div class="hw-acts">
+                    <button class="mini ghost" onClick={() => props.onToggle(h.id)}>
+                      撤销
+                    </button>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          ))}
+      </section>
+
+      <p class="hint">作业只存在这台设备上，不上传；分享出去的码里有课程和作业内容，别发到公开群。</p>
+    </div>
+  );
+}
+

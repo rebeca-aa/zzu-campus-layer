@@ -53,7 +53,26 @@ import {
 import { displayDayShanghai, msUntilMidnightShanghai, msUntilRollover, todayShanghai, weekOfDate } from '../src/core/util';
 import type { Term } from '../src/core/types';
 import { NoticeBoard } from '../src/ui/notice';
-import { HomeView, HueLine, LineSlider, MemoView, MineView, ScheduleView, TabBar, WeatherView, type Caller, type TabKey } from './views';
+import { HomeView, HomeworkView, HueLine, LineSlider, MemoView, MineView, ScheduleView, TabBar, WeatherView, type Caller, type TabKey } from './views';
+import {
+  DEFAULT_SETTINGS,
+  addHomework,
+  decodeHomeworkCode,
+  dueText,
+  encodeHomeworkCode,
+  homeworkReminders,
+  homeworkStats,
+  importHomeworkCode,
+  loadHomework,
+  loadHomeworkSettings,
+  removeHomework,
+  saveHomework,
+  saveHomeworkSettings,
+  toggleHomeworkDone,
+  type HomeworkDraft,
+  type HomeworkItem,
+  type HomeworkSettings,
+} from '../src/core/homework';
 import { fetchRelease, isNewer, SEEN_KEY, shouldAnnounce, type Release } from './update';
 import {
   applyCustomVars,
@@ -160,7 +179,15 @@ function App() {
   /* 底部四栏：主页 / AI / 学期课表 / 我的 */
   const [tab, setTab] = useState<TabKey>('home');
   /* 我的下面的二级页 */
-  const [sub, setSub] = useState<'none' | 'theme' | 'settings' | 'about' | 'survey'>('none');
+  const [sub, setSub] = useState<'none' | 'theme' | 'settings' | 'about' | 'survey' | 'homework'>('none');
+  /* 作业：清单只存本机；settings 里记提醒档位与上次导入信息 */
+  const [hw, setHw] = useState<HomeworkItem[]>([]);
+  const [hwSettings, setHwSettings] = useState<HomeworkSettings>(DEFAULT_SETTINGS);
+  const [hwNote, setHwNote] = useState('');
+  const hwRef = useRef({ items: hw, settings: hwSettings });
+  useEffect(() => {
+    hwRef.current = { items: hw, settings: hwSettings };
+  }, [hw, hwSettings]);
   const [term, setTerm] = useState<Term | null>(() => {
     const cached = readCachedTerm();
     if (!cached) return null;
@@ -395,6 +422,8 @@ const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
       const draft = await getKV().get<string>('draft');
       if (typeof draft === 'string' && draft) setInput(draft);
       setHomeBars(await loadHomeBars());
+    setHw(await loadHomework());
+    setHwSettings(await loadHomeworkSettings());
       // 上次聊的那几条带回来：换页面/重开不该从空白开始
       const items = await loadTranscript<Message>();
       restored.current = items;
@@ -587,7 +616,11 @@ const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
       if (!session.jwxtToken && !session.portalToken) return;
       const svc = new CampusService(session);
       const [courses, term] = await Promise.all([svc.courses(), svc.term().catch(() => undefined)]);
-      pushReminders(buildReminderBlocks(courses, { termStart: term?.startDate }));
+      pushReminders([
+        ...buildReminderBlocks(courses, { termStart: term?.startDate }),
+        /* 作业截止提醒跟课前提醒共用一套闹钟；已交的不会排 */
+        ...homeworkReminders(hwRef.current.items, hwRef.current.settings),
+      ]);
     } catch {
       /* 提醒排不上不该影响聊天 */
     }
@@ -1106,10 +1139,78 @@ const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
     setNavDir('fwd');
     setSheet('login');
   };
-  const openSub = (which: 'theme' | 'settings' | 'about' | 'survey') => {
+  const openSub = (which: 'theme' | 'settings' | 'about' | 'survey' | 'homework') => {
     mark();
     setNavDir('fwd');
     setSub(which);
+  };
+
+  /* 作业：清单、提交、分享码、提醒设置。全部只落本机，不联服务器 */
+  const persistHw = (next: HomeworkItem[]) => {
+    setHw(next);
+    void saveHomework(next);
+    /* 改了清单就重排一次：提交过的要从系统闹钟里撤掉 */
+    window.setTimeout(() => void syncReminders(), 30);
+  };
+  const hwTile = useMemo(() => {
+    const st = homeworkStats(hw, Date.now());
+    if (st.total === 0) return { text: '还没作业' };
+    if (st.todo === 0) return { text: `都交了 · 共 ${st.total} 条` };
+    const first = hw
+      .filter((h) => !h.doneAt && h.dueAt > Date.now() - 86400_000)
+      .sort((a, b) => a.dueAt - b.dueAt)[0];
+    const head = st.overdue > 0 ? `逾期 ${st.overdue} 条 · ` : '';
+    return {
+      text: `${head}${st.todo} 份待交${first ? ` · 最近 ${dueText(first.dueAt)}` : ''}`,
+      dot: st.overdue > 0,
+    };
+  }, [hw]);
+  const hwAdd = (drafts: HomeworkDraft[]) => {
+    let next = hw;
+    let added = 0;
+    for (const d of drafts) {
+      try {
+        next = addHomework(next, d, Date.now());
+        added += 1;
+      } catch (e) {
+        setHwNote((e as Error).message);
+      }
+    }
+    if (added > 0) {
+      persistHw(next);
+      setHwNote(`加了 ${added} 条`);
+    }
+  };
+  const hwToggle = (id: string) => persistHw(toggleHomeworkDone(hw, id, Date.now()));
+  const hwRemove = (id: string) => persistHw(removeHomework(hw, id));
+  const hwImport = (code: string, mode: 'replace' | 'merge') => {
+    try {
+      const parsed = decodeHomeworkCode(code);
+      const res = importHomeworkCode(hw, parsed, mode, Date.now());
+      const nextSettings: HomeworkSettings = {
+        ...hwSettings,
+        lastImport: { at: Date.now(), version: parsed.version, ...(parsed.from ? { from: parsed.from } : {}) },
+      };
+      setHwSettings(nextSettings);
+      void saveHomeworkSettings(nextSettings);
+      persistHw(res.items);
+      setHwNote(`${mode === 'merge' ? '合并' : '覆盖'}完成：新增 ${res.added} 条`);
+    } catch (e) {
+      setHwNote((e as Error).message);
+    }
+  };
+  const hwExport = () => {
+    try {
+      const code = encodeHomeworkCode(hw, { now: Date.now() });
+      void navigator.clipboard?.writeText(code);
+      setHwNote('作业码已复制（明文，别发到公开群）');
+    } catch (e) {
+      setHwNote((e as Error).message);
+    }
+  };
+  const hwSaveSettings = (next: HomeworkSettings) => {
+    setHwSettings(next);
+    void saveHomeworkSettings(next);
   };
 
   /* 问卷：进来先记一次打开，够条件了就在主页底部放一张小卡片（不弹全屏遮罩） */
@@ -1227,6 +1328,8 @@ const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
               setNavDir('fwd');
               goTab('memo');
             }}
+            hw={hwTile}
+            onHomework={() => openSub('homework')}
             bars={homeBars}
             onBarsChange={patchHomeBars}
             onPickBar={(text) => {
@@ -1745,6 +1848,35 @@ const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
         </section>
       )}
 
+
+      {sub === 'homework' && (
+        <section class={`subpage${slide}`} key="homework">
+          <div class="subhead">
+            <button
+              onClick={() => {
+                setNavDir('back');
+                stepBack();
+              }}
+            >
+              ‹ 返回
+            </button>
+            <strong>作业</strong>
+          </div>
+          <div class="tabbody">
+            <HomeworkView
+              items={hw}
+              settings={hwSettings}
+              {...(hwNote ? { note: hwNote } : {})}
+              onAdd={hwAdd}
+              onToggle={hwToggle}
+              onRemove={hwRemove}
+              onImport={hwImport}
+              onExport={hwExport}
+              onSaveSettings={hwSaveSettings}
+            />
+          </div>
+        </section>
+      )}
 
       {sub === 'survey' && (
         <section class={`subpage${slide}`} key="survey">
