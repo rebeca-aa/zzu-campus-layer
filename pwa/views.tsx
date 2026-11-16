@@ -15,7 +15,7 @@ import {
   type HomeworkRemind,
   type HomeworkSettings,
 } from '../src/core/homework';
-import { parseHomeworkSmart } from '../src/core/hwParse';
+import { parseHomeworkFromImages, parseHomeworkSmart } from '../src/core/hwParse';
 import {
   DEFAULT_HOME_BAR_FIXED,
   MAX_HOME_BARS,
@@ -2092,6 +2092,36 @@ function toLocalInput(ms: number): string {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 
+/** 选中的图片先压到 1400px、JPEG 0.82 再发：手机原图 5MB 级，既慢又容易被服务商拒 */
+async function fileToDataUrl(file: File): Promise<string> {
+  const raw = await new Promise<string>((res, rej) => {
+    const fr = new FileReader();
+    fr.onload = () => res(String(fr.result ?? ''));
+    fr.onerror = () => rej(new Error('读不了这张图'));
+    fr.readAsDataURL(file);
+  });
+  try {
+    const img = await new Promise<HTMLImageElement>((res, rej) => {
+      const i = new Image();
+      i.onload = () => res(i);
+      i.onerror = () => rej(new Error('这张图打不开'));
+      i.src = raw;
+    });
+    const side = Math.max(img.naturalWidth, img.naturalHeight);
+    const scale = Math.min(1, 1400 / Math.max(side, 1));
+    if (scale >= 1 && raw.length < 700_000) return raw;
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, Math.round(img.naturalWidth * scale));
+    canvas.height = Math.max(1, Math.round(img.naturalHeight * scale));
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return raw;
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    return canvas.toDataURL('image/jpeg', 0.82);
+  } catch {
+    return raw;
+  }
+}
+
 export function HomeworkView(props: HomeworkViewProps) {
   const now = Date.now();
   const [paste, setPaste] = useState('');
@@ -2099,6 +2129,9 @@ export function HomeworkView(props: HomeworkViewProps) {
   /** 识别用的是模型还是规则、为什么退化——直接显示在草稿上方 */
   const [parseNote, setParseNote] = useState('');
   const [busy, setBusy] = useState(false);
+  /** 读图是另一个耗时动作，跟文字识别分开标 */
+  const [imgBusy, setImgBusy] = useState(false);
+  const fileRef = useRef<HTMLInputElement | null>(null);
   const [manual, setManual] = useState({ title: '', course: '', due: '' });
   const [manualOpen, setManualOpen] = useState(false);
   const [code, setCode] = useState('');
@@ -2123,6 +2156,27 @@ export function HomeworkView(props: HomeworkViewProps) {
       setParseNote(`识别失败：${(err as Error)?.message ?? err}`);
     } finally {
       setBusy(false);
+    }
+  };
+
+  /** 选几张图一起读：一张截图里通常就一条，清单/表格截图可能好几条 */
+  const doImage = async (files: FileList | File[] | null) => {
+    const picked = Array.from(files ?? [])
+      .filter((f) => f.type.startsWith('image/'))
+      .slice(0, 4);
+    if (!picked.length || imgBusy) return;
+    setImgBusy(true);
+    setParseNote('');
+    try {
+      const urls = await Promise.all(picked.map((f) => fileToDataUrl(f)));
+      const out = await parseHomeworkFromImages(urls, { now: Date.now() });
+      setDrafts(out.drafts.length ? out.drafts : null);
+      setParseNote(out.note ?? '');
+    } catch (err) {
+      setParseNote(`读图失败：${(err as Error)?.message ?? err}`);
+    } finally {
+      setImgBusy(false);
+      if (fileRef.current) fileRef.current.value = '';
     }
   };
 
@@ -2201,16 +2255,36 @@ export function HomeworkView(props: HomeworkViewProps) {
           placeholder="例如：@所有人 高数作业：习题册 3.1–3.4 周五前交，纸质交到学委那儿"
           value={paste}
           onInput={(e) => setPaste((e.currentTarget as HTMLTextAreaElement).value)}
+          onPaste={(e) => {
+            /* 截图直接粘进输入框也能读：剪贴板里带图就交给读图那条路 */
+            const imgs = Array.from(e.clipboardData?.files ?? []).filter((f) => f.type.startsWith('image/'));
+            if (!imgs.length) return;
+            e.preventDefault();
+            void doImage(imgs);
+          }}
         />
         <div class="hw-acts-row">
           <button class="primary" disabled={!paste.trim() || busy} onClick={() => void doParse()}>
             {busy ? '识别中…' : '识别'}
           </button>
+          <button class="ghost" disabled={imgBusy} onClick={() => fileRef.current?.click()}>
+            {imgBusy ? '读图中…' : '读图'}
+          </button>
           <button class="ghost" onClick={() => setManualOpen((v) => !v)}>
             {manualOpen ? '收起手填' : '手动填'}
           </button>
         </div>
-        <p class="hw-src">配了模型就让模型读（拆条、挑课程、算截止都准），没配才走规则。</p>
+        <input
+          ref={fileRef}
+          type="file"
+          accept="image/*"
+          multiple
+          class="hw-img-input"
+          onChange={(e) => void doImage((e.currentTarget as HTMLInputElement).files)}
+        />
+        <p class="hw-src">
+          配了模型就让模型读（拆条、挑课程、算截止都准），没配才走规则；截图直接点「读图」，一次能挑好几张。
+        </p>
 
         {manualOpen && (
           <div class="hw-manual">

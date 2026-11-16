@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { normalizeLlmItems, parseHomeworkSmart, sameHomeworkTitle } from '../src/core/hwParse';
+import { normalizeLlmItems, parseHomeworkFromImages, parseHomeworkSmart, sameHomeworkTitle } from '../src/core/hwParse';
 
 /** 与 homework.test.ts 对齐：2026-11-13 09:00 周五 */
 const NOW = new Date(2026, 10, 13, 9, 0, 0, 0).getTime();
@@ -128,5 +128,92 @@ describe('sameHomeworkTitle', () => {
 
   it('空串不算', () => {
     expect(sameHomeworkTitle('', '')).toBe(false);
+  });
+});
+
+describe('parseHomeworkFromImages：读截图', () => {
+  const IMG = 'data:image/png;base64,iVBORw0KGgo=';
+  const VISION = { enabled: true, provider: 'siliconflow', apiKey: 'sk-test', model: 'Qwen/Qwen2.5-7B-Instruct' };
+
+  it('用服务商的识图模型读图，图里几项就出几条', async () => {
+    const seen: Array<{ prompt: string; images: string[]; model: string }> = [];
+    const chat = async (prompt: string, images: string[], model: string) => {
+      seen.push({ prompt, images, model });
+      return '```json\n{"items":[{"title":"习题册 3.1–3.4","course":"高数","due":"2026-11-20T23:59:00+08:00"},{"title":"大物实验报告","due":"2026-11-25T23:59:00+08:00"}]}\n```';
+    };
+    const out = await parseHomeworkFromImages([IMG], { now: NOW, settings: VISION, chat });
+    expect(out.via).toBe('llm');
+    expect(out.drafts).toHaveLength(2);
+    expect(out.drafts.map((d) => d.title)).toEqual(['习题册 3.1–3.4', '大物实验报告']);
+    expect(seen).toHaveLength(1);
+    expect(seen[0]!.images).toEqual([IMG]);
+    /* 用户配的是 Qwen2.5-7B（看不了图），自动换成同服务商的 VL 模型 */
+    expect(seen[0]!.model).toContain('VL');
+    expect(out.note).toContain('看不了图');
+    expect(out.note).toContain('共 2 条');
+  });
+
+  it('配的本来就是识图模型，就不换', async () => {
+    const chat = async (_p: string, _i: string[], model: string) => {
+      expect(model).toBe('Qwen/Qwen2.5-VL-7B-Instruct');
+      return '{"items":[{"title":"英语作文二","due":"2026-11-15T23:59:00+08:00"}]}';
+    };
+    const out = await parseHomeworkFromImages([IMG], {
+      now: NOW,
+      settings: { ...VISION, model: 'Qwen/Qwen2.5-VL-7B-Instruct' },
+      chat,
+    });
+    expect(out.drafts).toHaveLength(1);
+    expect(out.note).not.toContain('看不了图');
+  });
+
+  it('多张图一起读，结果合并', async () => {
+    const chat = async (_p: string, images: string[]) => {
+      expect(images).toHaveLength(2);
+      return '{"items":[{"title":"习题册 3.1–3.4","due":"2026-11-20T23:59:00+08:00"},{"title":"英语作文二","due":"2026-11-22T23:59:00+08:00"}]}';
+    };
+    const out = await parseHomeworkFromImages([IMG, IMG.replace('png', 'jpeg')], {
+      now: NOW,
+      settings: VISION,
+      chat,
+    });
+    expect(out.drafts).toHaveLength(2);
+    expect(out.note).toContain('2 张图');
+  });
+
+  it('没填 Key / 服务商没有识图模型时，给一句能照着做的话，且不发请求', async () => {
+    let called = false;
+    const chat = async () => {
+      called = true;
+      return '{}';
+    };
+    const noKey = await parseHomeworkFromImages([IMG], { now: NOW, settings: { ...VISION, apiKey: '' }, chat });
+    expect(noKey.drafts).toHaveLength(0);
+    expect(noKey.note).toContain('支持看图的 Key');
+    const deepseek = await parseHomeworkFromImages([IMG], {
+      now: NOW,
+      settings: { enabled: true, provider: 'deepseek', apiKey: 'sk-x', model: 'deepseek-chat' },
+      chat,
+    });
+    expect(deepseek.drafts).toHaveLength(0);
+    expect(deepseek.note).toContain('没有能看图的模型');
+    expect(called).toBe(false);
+  });
+
+  it('模型不认图时把原话带出来', async () => {
+    const chat = async () => {
+      const err = new Error('400 invalid_request_error: this model does not support image input');
+      throw err;
+    };
+    const out = await parseHomeworkFromImages([IMG], { now: NOW, settings: VISION, chat });
+    expect(out.drafts).toHaveLength(0);
+    expect(out.note).toContain('不认图');
+  });
+
+  it('图里没有作业就明说，不硬凑', async () => {
+    const chat = async () => '{"items":[]}';
+    const out = await parseHomeworkFromImages([IMG], { now: NOW, settings: VISION, chat });
+    expect(out.drafts).toHaveLength(0);
+    expect(out.note).toContain('没认出');
   });
 });

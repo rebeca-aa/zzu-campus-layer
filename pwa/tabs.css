@@ -2510,6 +2510,8 @@ html[data-theme='pink'] .grid .course .tag {
   font-size: 11.5px;
   line-height: 1.5;
 }
+/* 读图用的文件选择框：点按钮触发，本身不显示 */
+.hw-img-input { display: none; }
 .hw-acts-row {
   display: flex;
   flex-wrap: wrap;

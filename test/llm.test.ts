@@ -2,12 +2,15 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   classifyIntent,
   classifyIntentVerbose,
+  canSeeImages,
   llmChat,
+  llmChatVision,
   mintApiKey,
   parseIntentsJson,
   parseModelReply,
   probeLlm,
   stripThink,
+  visionModelFor,
   type LlmSettings,
 } from '../src/core/llm';
 
@@ -336,5 +339,70 @@ describe('probeLlm', () => {
     const got = await probeLlm({ provider: 'deepseek', apiKey: 'sk-x', model: 'deepseek-chat' });
     expect(got.ok).toBe(false);
     expect(got.error).toContain('bad key');
+  });
+});
+
+describe('识图：模型能不能看图', () => {
+  it('名字里带 VL / vision / gemini 的算能看图', () => {
+    expect(canSeeImages('Qwen/Qwen2.5-VL-7B-Instruct')).toBe(true);
+    expect(canSeeImages('glm-4v-flash')).toBe(true);
+    expect(canSeeImages('google/gemini-2.0-flash-001')).toBe(true);
+    expect(canSeeImages('gpt-4o-mini')).toBe(true);
+    expect(canSeeImages('deepseek-chat')).toBe(false);
+    expect(canSeeImages('moonshot-v1-8k')).toBe(false);
+    expect(canSeeImages('DeepSeek-R1')).toBe(false);
+  });
+
+  it('用户配的模型看不了图，就换成同服务商的识图模型', () => {
+    expect(visionModelFor({ provider: 'siliconflow', apiKey: 'k', model: '' })).toEqual({
+      model: 'Qwen/Qwen2.5-VL-7B-Instruct',
+      switched: true,
+    });
+    expect(visionModelFor({ provider: 'dashscope', apiKey: 'k', model: 'qwen-plus' })?.model).toBe('qwen-vl-max');
+    expect(visionModelFor({ provider: 'siliconflow', apiKey: 'k', model: 'Qwen/Qwen2.5-VL-32B' })).toEqual({
+      model: 'Qwen/Qwen2.5-VL-32B',
+      switched: false,
+    });
+    /* 学校 R1 和 DeepSeek 官方都没有识图模型 */
+    expect(visionModelFor({ provider: 'school', apiKey: 'k', model: 'DeepSeek-R1' })).toBeNull();
+    expect(visionModelFor({ provider: 'deepseek', apiKey: 'k', model: 'deepseek-chat' })).toBeNull();
+  });
+});
+
+describe('llmChatVision', () => {
+  it('图片按多模态片段发出去，模型名用指定的那个', async () => {
+    const calls: Array<{ url: string; body: Record<string, unknown> }> = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, init: RequestInit) => {
+        calls.push({ url, body: JSON.parse(String(init.body)) });
+        return new Response(JSON.stringify({ choices: [{ message: { content: 'ok' } }] }), { status: 200 });
+      }),
+    );
+    const img = 'data:image/png;base64,iVBORw0KGgo=';
+    const text = await llmChatVision(
+      { provider: 'siliconflow', apiKey: 'sk-x', model: 'Qwen/Qwen2.5-7B-Instruct' },
+      '读这张图',
+      [img],
+      { model: 'Qwen/Qwen2.5-VL-7B-Instruct', maxTokens: 64 },
+    );
+    expect(text).toBe('ok');
+    expect(calls[0]!.url).toBe('https://api.siliconflow.cn/v1/chat/completions');
+    expect(calls[0]!.body).toMatchObject({ model: 'Qwen/Qwen2.5-VL-7B-Instruct', max_tokens: 64, stream: false });
+    const messages = calls[0]!.body.messages as Array<{ role: string; content: unknown }>;
+    expect(messages[0]!.role).toBe('user');
+    expect(messages[0]!.content).toEqual([
+      { type: 'text', text: '读这张图' },
+      { type: 'image_url', image_url: { url: img } },
+    ]);
+  });
+
+  it('没 key 时不发请求', async () => {
+    const spy = vi.fn();
+    vi.stubGlobal('fetch', spy);
+    await expect(
+      llmChatVision({ provider: 'siliconflow', apiKey: '', model: 'x' }, 'hi', []),
+    ).rejects.toMatchObject({ status: 401 });
+    expect(spy).not.toHaveBeenCalled();
   });
 });

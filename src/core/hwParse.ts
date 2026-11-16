@@ -12,7 +12,7 @@
  *  - 没有 Key / 模型关了 / 调用失败，一律静默退回 `parseHomework`，功能不能因此挂掉；
  *  - 模型给的时间一律再过一遍本地 `parseDueAt` 兜底/夹正，绝不直接信它编的年份。
  */
-import { LlmError, llmChat, resolveProvider } from './llm';
+import { LlmError, llmChat, llmChatVision, resolveProvider, visionModelFor } from './llm';
 import { getLlmSettings, type LlmSettingsStored } from './storage';
 import { parseDueAt, parseHomework, type HomeworkDraft } from './homework';
 
@@ -247,4 +247,113 @@ export async function parseHomeworkSmart(text: string, opts: HwParseOptions = {}
   if (added) bits.push(`规则补了 ${added} 条`);
   if (guessed) bits.push(`${guessed} 条没写清截止，先按明天 23:59`);
   return { drafts: merged, via: 'llm', note: bits.join(' · ') };
+}
+
+/* ─────────────────────────── 读图 ─────────────────────────── */
+
+/** 一次最多读几张：多了既慢又贵，手机上截图一般 1–3 张就够 */
+const MAX_IMAGES = 4;
+
+type VisionChatFn = (prompt: string, images: string[], model: string) => Promise<string>;
+
+export interface HwImageOptions {
+  now?: number;
+  settings?: Pick<LlmSettingsStored, 'enabled' | 'provider' | 'apiKey' | 'model'>;
+  /** 测试注入：替换真实的 llmChatVision */
+  chat?: VisionChatFn;
+  timeoutMs?: number;
+}
+
+function imagePrompt(now: number): string {
+  return [
+    systemPrompt(now).replace('从一段群消息里挑出', '从截图里挑出').replace('群消息原文：', ''),
+    '',
+    '这次输入是图片（群消息截图、通知截图、作业清单截图，可能糊、可能歪）。',
+    '先把图里的文字在心里读出来，再按上面的规则拆成作业条目；',
+    '图里如果是一张表格或者一列清单，就一条一条拆，别合并成一条。',
+    '图里没有需要交的作业（比如只是闲聊、只是课程表）就输出 {"items":[]}。',
+  ].join('\n');
+}
+
+/** 把服务商的「不支持图片」类报错翻成一句能指导用户的话 */
+function imageErrorHint(msg: string): string {
+  if (/image|vision|multimodal|content|attachment|modality|invalid_request|400|422/i.test(msg)) {
+    return `这个模型好像不认图（${msg.slice(0, 80)}）——换一个识图模型再试，或者把文字直接粘进来`;
+  }
+  return `读图失败：${msg}`;
+}
+
+/**
+ * 从截图里识别作业：只走模型（图里的字规则读不出来）。
+ * 模型不能看图 / 没 Key / 调用失败时返回空草稿 + 说明，界面照常提示用户。
+ */
+export async function parseHomeworkFromImages(
+  images: string[],
+  opts: HwImageOptions = {},
+): Promise<HwParseOutcome> {
+  const now = opts.now ?? Date.now();
+  const list = images.filter((u) => /^(data:image\/|https?:)/.test(u)).slice(0, MAX_IMAGES);
+  if (!list.length) return { drafts: [], via: 'llm', note: '没拿到图片：换一张再试' };
+
+  let settings: Pick<LlmSettingsStored, 'enabled' | 'provider' | 'apiKey' | 'model'>;
+  try {
+    settings = opts.settings ?? (await getLlmSettings());
+  } catch {
+    return { drafts: [], via: 'llm', note: '读不到模型设置，没法读图' };
+  }
+  const label = resolveProvider(settings.provider).label;
+  if (!settings.enabled) {
+    return { drafts: [], via: 'llm', note: '模型在设置里关掉了；读图只能靠模型，去「我的 → 模型」打开它' };
+  }
+  if (!settings.apiKey.trim()) {
+    return {
+      drafts: [],
+      via: 'llm',
+      note: '读图要靠模型：去「我的 → 模型」填一个支持看图的 Key（硅基流动、百炼、智谱、Moonshot、OpenRouter 都行）',
+    };
+  }
+  const target = visionModelFor(settings);
+  if (!target) {
+    return {
+      drafts: [],
+      via: 'llm',
+      note: `${label} 这边没有能看图的模型（它只能读文字）：换硅基流动 / 百炼 / 智谱 / Moonshot / OpenRouter 再试`,
+    };
+  }
+
+  const chat: VisionChatFn =
+    opts.chat ??
+    ((prompt, imgs, model) =>
+      llmChatVision(
+        { provider: settings.provider, apiKey: settings.apiKey, model: settings.model },
+        prompt,
+        imgs,
+        { model, maxTokens: 1200, temperature: 0, timeoutMs: opts.timeoutMs ?? 45_000 },
+      ));
+
+  let raw: string;
+  try {
+    raw = await chat(imagePrompt(now), list, target.model);
+  } catch (err) {
+    const msg = err instanceof LlmError ? err.message : (err as Error)?.message ?? String(err);
+    return { drafts: [], via: 'llm', note: imageErrorHint(msg) };
+  }
+
+  const parsed = extractJson(raw);
+  const entries = Array.isArray(parsed) ? parsed : (parsed as { items?: unknown[] })?.items;
+  if (Array.isArray(entries) && entries.length === 0) {
+    return { drafts: [], via: 'llm', note: '图里没认出要交的作业；字迹太糊的话，直接把文字粘进来更稳' };
+  }
+  const { drafts, guessed } = normalizeLlmItems(parsed, now);
+  if (!drafts.length) {
+    return { drafts: [], via: 'llm', note: '模型没从图里读出能用的作业，换个清楚点的截图再试' };
+  }
+
+  const bits: string[] = [
+    `${label} 的 ${target.model.split('/').pop() ?? target.model} 读的${list.length > 1 ? ` ${list.length} 张图` : '图'}`,
+  ];
+  if (target.switched) bits.push(`你配的 ${settings.model || '默认模型'} 看不了图，顺手换了识图模型`);
+  if (guessed) bits.push(`${guessed} 条没写清截止，先按明天 23:59`);
+  bits.push(`共 ${drafts.length} 条`);
+  return { drafts, via: 'llm', note: bits.join(' · ') };
 }

@@ -28,6 +28,8 @@ export interface LlmProvider {
   baseUrl: string;
   /** 预设模型名，用户可以改 */
   model: string;
+  /** 这个服务商这边「能看图」的模型名；没有就说明它没有识图模型 */
+  vision?: string;
   /** 只有校园网 / VPN 可达 */
   campusOnly?: boolean;
   /** 是否支持原生 function calling（决定走「工具循环」还是老的 JSON 判意图） */
@@ -42,6 +44,7 @@ export const LLM_PROVIDERS: LlmProvider[] = [
     label: '智谱 GLM',
     baseUrl: 'https://open.bigmodel.cn/api/paas/v4',
     model: 'glm-4.7-flash',
+    vision: 'glm-4v-flash',
     hint: '智谱的对话接口不允许浏览器跨域直连：手机 PWA 用不了，浏览器扩展里可以（扩展不受 CORS 限制）。',
   },
   {
@@ -54,7 +57,7 @@ export const LLM_PROVIDERS: LlmProvider[] = [
     // 学校现在只给 R1（推理模型，带 think 段），没有 function calling；
     // 走老的「JSON 判意图」路径，别指望它可靠地调工具。
     supportsTools: false,
-    hint: 'DS-R1 · 只能校园网 / VPN · 手机端用不了（页面是 https，它是 http）。',
+    hint: 'DS-R1 · 只能校园网 / VPN · 手机端用不了（页面是 https，它是 http）· 也看不了图。',
   },
   {
     id: 'deepseek',
@@ -62,13 +65,14 @@ export const LLM_PROVIDERS: LlmProvider[] = [
     baseUrl: 'https://api.deepseek.com',
     model: 'deepseek-chat',
     supportsTools: true,
-    hint: 'deepseek-chat（v4 代）支持工具调用，快且便宜，推荐。',
+    hint: 'deepseek-chat（v4 代）支持工具调用，快且便宜，推荐（看图要换别的服务商）。',
   },
   {
     id: 'siliconflow',
     label: '硅基流动',
     baseUrl: 'https://api.siliconflow.cn/v1',
     model: 'Qwen/Qwen2.5-7B-Instruct',
+    vision: 'Qwen/Qwen2.5-VL-7B-Instruct',
     supportsTools: true,
   },
   {
@@ -76,6 +80,7 @@ export const LLM_PROVIDERS: LlmProvider[] = [
     label: '阿里百炼',
     baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
     model: 'qwen-plus',
+    vision: 'qwen-vl-max',
     supportsTools: true,
   },
   {
@@ -83,6 +88,7 @@ export const LLM_PROVIDERS: LlmProvider[] = [
     label: 'Moonshot',
     baseUrl: 'https://api.moonshot.cn/v1',
     model: 'moonshot-v1-8k',
+    vision: 'moonshot-v1-8k-vision-preview',
     supportsTools: true,
   },
   {
@@ -90,6 +96,7 @@ export const LLM_PROVIDERS: LlmProvider[] = [
     label: 'OpenRouter',
     baseUrl: 'https://openrouter.ai/api/v1',
     model: 'deepseek/deepseek-chat',
+    vision: 'google/gemini-2.0-flash-001',
     supportsTools: true,
   },
 ];
@@ -126,9 +133,45 @@ export const DEFAULT_LLM_SETTINGS: LlmSettings = {
   model: DEFAULT_MODEL,
 };
 
+/** 一条消息的内容：纯文本，或多模态片段（识图时用） */
+export type ContentPart =
+  | { type: 'text'; text: string }
+  | { type: 'image_url'; image_url: { url: string } };
+
 interface ChatMessage {
   role: 'system' | 'user' | 'assistant';
-  content: string;
+  content: string | ContentPart[];
+}
+
+/** 模型名里带这些的，基本都能看图（各家的命名都不一样，只能猜个大概） */
+const VISION_NAME = /(?:^|[/_-])(?:vl|vision|omni)(?:[/_.-]|$)|glm-4v|gpt-4o|gpt-4\.1|gemini|claude-3|internvl|pixtral|qwen2\.5-vl|qvq/i;
+
+/** 这个模型名看起来能不能读图 */
+export function canSeeImages(model: string): boolean {
+  return VISION_NAME.test(model.trim());
+}
+
+export interface VisionTarget {
+  /** 实际要用的模型名 */
+  model: string;
+  /** true = 用户配的模型看不了图，自动换成了服务商的识图模型 */
+  switched: boolean;
+}
+
+/**
+ * 决定「读图用哪个模型」：
+ *  1. 用户配的模型本来就认图 → 直接用；
+ *  2. 服务商预设里有识图模型 → 换成它（同一个 key）；
+ *  3. 都没有（比如 DeepSeek 官方、学校 R1）→ null，界面提示换服务商。
+ */
+export function visionModelFor(
+  cfg: Pick<LlmSettings, 'provider' | 'apiKey' | 'model'>,
+): VisionTarget | null {
+  const provider = resolveProvider(cfg.provider);
+  const model = cfg.model.trim() || provider.model;
+  if (canSeeImages(model)) return { model, switched: false };
+  if (provider.vision) return { model: provider.vision, switched: true };
+  return null;
 }
 
 /** 去掉 DeepSeek-R1 的推理段（`<think>…</think>`），只留答案。 */
@@ -181,7 +224,7 @@ function friendlyHttpError(status: number, raw: string, provider: LlmProvider): 
 /** 线上消息（tool_calls / tool 角色都要原样回传，否则服务端会报错）。 */
 export interface WireMessage {
   role: 'system' | 'user' | 'assistant' | 'tool';
-  content: string | null;
+  content: string | null | ContentPart[];
   tool_call_id?: string;
   tool_calls?: Array<{ id: string; type: 'function'; function: { name: string; arguments: string } }>;
 }
@@ -301,6 +344,34 @@ export async function llmChat(
       messages,
       stream: false,
       ...(opts.maxTokens ? { max_tokens: opts.maxTokens } : {}),
+    }),
+    opts,
+  );
+  return reply.content;
+}
+
+/**
+ * 带图的一次对话（OpenAI 兼容的多模态消息）。图片传 data URL 或 https 地址。
+ * 模型能不能看图由调用方先过 `visionModelFor()` 判断——这里只管发出去。
+ */
+export async function llmChatVision(
+  cfg: Pick<LlmSettings, 'provider' | 'apiKey' | 'model'>,
+  prompt: string,
+  images: string[],
+  opts: ChatOptions & { model?: string } = {},
+): Promise<string> {
+  const parts: ContentPart[] = [
+    { type: 'text', text: prompt },
+    ...images.map((url) => ({ type: 'image_url' as const, image_url: { url } })),
+  ];
+  const reply = await postChat(
+    cfg,
+    (provider) => ({
+      model: (opts.model ?? cfg.model).trim() || provider.model,
+      messages: [{ role: 'user', content: parts }],
+      stream: false,
+      ...(opts.maxTokens ? { max_tokens: opts.maxTokens } : {}),
+      ...(opts.temperature === undefined ? {} : { temperature: opts.temperature }),
     }),
     opts,
   );
