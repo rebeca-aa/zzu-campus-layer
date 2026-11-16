@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { normalizeLlmItems, parseHomeworkFromImages, parseHomeworkSmart, sameHomeworkTitle } from '../src/core/hwParse';
+import { normalizeLlmItems, parseHomeworkFromImages, parseHomeworkSmart, sameHomeworkTitle, splitSegments } from '../src/core/hwParse';
 
 /** 与 homework.test.ts 对齐：2026-11-13 09:00 周五 */
 const NOW = new Date(2026, 10, 13, 9, 0, 0, 0).getTime();
@@ -278,5 +278,71 @@ describe('parseHomeworkFromImages：读截图', () => {
     expect(out.drafts).toHaveLength(1);
     expect(out.drafts[0]?.dueAt).toBeLessThan(NOW);
     expect(out.note).toContain('截止时间已经过了');
+  });
+});
+
+describe('漏条自检：模型只给一条时按段补问', () => {
+  const TWO_LINES = '高数作业：习题册 3.1-3.4 周五前交\n英语作文三 下周三之前交，传学习通';
+  const settings = { enabled: true, provider: 'deepseek', apiKey: 'sk-test', model: 'deepseek-flash' } as const;
+
+  it('两行两条作业，模型偷懒只回一条 → 逐段补问后能凑齐两条', async () => {
+    let calls = 0;
+    const chat = async (messages: Array<{ role: string; content: string }>) => {
+      calls += 1;
+      const user = messages[1]?.content ?? '';
+      if (user.includes('英语作文三')) {
+        return '{"items":[{"title":"英语作文三","due":"2026-11-18T23:59:00+08:00"}]}';
+      }
+      return '{"items":[{"title":"习题册 3.1–3.4","course":"高等数学","due":"2026-11-20T23:59:00+08:00"}]}';
+    };
+    const out = await parseHomeworkSmart(TWO_LINES, { now: NOW, settings, chat });
+    expect(out.drafts.length).toBe(2);
+    expect(out.drafts.map((d) => d.title).join('|')).toContain('英语作文三');
+    expect(calls).toBeGreaterThan(2);
+    expect(out.note).toContain('分段补了');
+  });
+
+  it('模型一次就给全了就不再多问', async () => {
+    let calls = 0;
+    const chat = async () => {
+      calls += 1;
+      return '{"items":[{"title":"习题册 3.1–3.4","course":"高等数学","due":"2026-11-20T23:59:00+08:00"},{"title":"英语作文三","course":"英语","due":"2026-11-18T23:59:00+08:00"}]}';
+    };
+    const out = await parseHomeworkSmart(TWO_LINES, { now: NOW, settings, chat });
+    expect(out.drafts.length).toBe(2);
+    expect(calls).toBe(1);
+  });
+
+  it('splitSegments 按行和句切，太短的碎句不算', () => {
+    expect(splitSegments('第一条作业周五交\n\n好\n第二条作业下周一交')).toHaveLength(2);
+    expect(splitSegments('交高数习题册。交英语作文三。')).toHaveLength(2);
+    expect(splitSegments('只有一条作业需要交')).toHaveLength(1);
+  });
+
+  it('一句话里用「和」连着的两件事，第一次只回一条时会再确认一遍', async () => {
+    let calls = 0;
+    const chat = async (messages: Array<{ role: string; content: string }>) => {
+      calls += 1;
+      const user = messages[1]?.content ?? '';
+      if (user.includes('再数') || user.includes('别硬拆')) {
+        return '{"items":[{"title":"高数习题册","course":"高等数学","due":"2026-11-20T23:59:00+08:00"},{"title":"英语作文三","course":"英语","due":"2026-11-18T23:59:00+08:00"}]}';
+      }
+      return '{"items":[{"title":"高数习题册","course":"高等数学","due":"2026-11-20T23:59:00+08:00"}]}';
+    };
+    const out = await parseHomeworkSmart('周五前交高数习题册和英语作文三', { now: NOW, settings, chat });
+    expect(out.drafts.length).toBe(2);
+    expect(calls).toBe(2);
+  });
+
+  it('并列词但真的只有一条：再问一次也还是一条，不会硬拆', async () => {
+    let calls = 0;
+    const chat = async () => {
+      calls += 1;
+      return '{"items":[{"title":"高数习题册 3.1-3.4","course":"高等数学","due":"2026-11-20T23:59:00+08:00"}]}';
+    };
+    const out = await parseHomeworkSmart('周五前把习题册和作业本一起交', { now: NOW, settings, chat });
+    expect(out.drafts.length).toBe(1);
+    expect(calls).toBe(2);
+    expect(out.note).not.toContain('分段补了');
   });
 });

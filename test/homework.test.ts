@@ -6,6 +6,7 @@ import {
   encodeHomeworkCode,
   homeworkReminders,
   homeworkState,
+  guessCourse,
   homeworkStats,
   importHomeworkCode,
   loadHomework,
@@ -345,5 +346,18 @@ describe('标题里不留交作业的时间（2026-11 加）', () => {
   it('标题里本来就没有时间的，不会被削', () => {
     const drafts = parseHomework('第三章习题 明天交', NOW);
     expect(drafts[0]!.title).toBe('第三章习题');
+  });
+});
+
+describe('课程名别把时间词当课名', () => {
+  it('「周五前把…习题册」抓到的不是课程', () => {
+    expect(guessCourse('周五前把习题册和作业本一起交')).toBeUndefined();
+    expect(guessCourse('下周一大物实验报告')).toBeUndefined();
+  });
+
+  it('正常的课程名照样认得', () => {
+    expect(guessCourse('高数作业：习题册 3.1-3.4')).toBe('高数');
+    expect(guessCourse('《大学物理》实验报告')).toBe('大学物理');
+    expect(guessCourse('英语作文三，传学习通')).toBe('英语');
   });
 });

@@ -65,7 +65,14 @@ function systemPrompt(now: number): string {
     '   - 只说了「这周内」= 本周日 23:59；完全没提时间的条目不要输出。',
     '4. note：只写交法（纸质 / 学习通 / 雨课堂 / 实验报告），没有就省略。',
     '5. 一段话里可能有好几门课、好几条作业：逐条拆开，同一个作业不要重复输出。',
+    '   - 并列的必须拆：「交高数习题册和英语作文三」是两条；「、」「还有」「另外」「同时」「以及」都是并列信号；',
+    '   - 一句里两件事、一行里两件事、连着说的两门课，都要拆成两条。',
+    '   - 先在草稿里数一下：这段话一共要让交几样东西？输出条数必须等于你数出来的那个数，少一条就重数。',
     '6. 拿不准的字段宁可省略，不要编。',
+    '',
+    '例：原文「今晚交高数习题册，另外英语作文三周五前交学习通」→ 两条，不是一条：',
+    '{"items":[{"title":"高数习题册","course":"高等数学"},{"title":"英语作文三","course":"英语","note":"学习通"}]}',
+    '（due 按上面的规则算，这里省略只是为了让例子短）',
   ].join('\n');
 }
 
@@ -231,6 +238,24 @@ export function sameHomeworkTitle(a: string, b: string): boolean {
   return hit / Math.min(ga.size, gb.size) >= 0.6;
 }
 
+/**
+ * 按行 / 句把原文切成「可能各自是一条作业」的段。
+ * 只用来估条数、以及在疑似漏条时分段重问，不参与字段抽取。
+ */
+export function splitSegments(text: string): string[] {
+  const out: string[] = [];
+  for (const line of text.split(/\r?\n/)) {
+    const s = line.trim();
+    if (s.length < 6) continue;
+    const parts = s
+      .split(/(?<=[。；;！!？?])\s*/)
+      .map((x) => x.trim())
+      .filter((x) => x.length >= 6);
+    if (parts.length > 1) out.push(...parts);
+    else out.push(s);
+  }
+  return out.slice(0, 6);
+}
 function ruleOutcome(text: string, now: number, note: string): HwParseOutcome {
   return { drafts: parseHomework(text, now), via: 'rule', note };
 }
@@ -264,28 +289,79 @@ export async function parseHomeworkSmart(text: string, opts: HwParseOptions = {}
         { maxTokens: 900, temperature: 0, timeoutMs: opts.timeoutMs ?? 30_000 },
       ));
 
-  let raw: string;
-  try {
-    raw = await chat([
-      { role: 'system', content: systemPrompt(now) },
-      { role: 'user', content: `群消息原文：\n${body}` },
-    ]);
-  } catch (err) {
-    const msg = err instanceof LlmError ? err.message : (err as Error)?.message ?? String(err);
-    return ruleOutcome(text, now, `模型没答上来（${msg}），先用规则识别`);
-  }
+  type Ask = { raw: string; drafts: HomeworkDraft[]; guessed: number };
 
-  const parsedText = extractJson(raw);
-  let { drafts: llmDrafts, guessed } = normalizeLlmItems(parsedText, now);
-  if (!llmDrafts.length) {
+  /** 问一次模型：整段问、还是只问其中一段，都走这里 */
+  const askOnce = async (source: string, hint = ''): Promise<Ask> => {
+    const raw = await chat([
+      { role: 'system', content: systemPrompt(now) },
+      { role: 'user', content: `群消息原文：\n${source}${hint ? `\n\n${hint}` : ''}` },
+    ]);
+    const first = normalizeLlmItems(extractJson(raw), now);
+    if (first.drafts.length) return { raw, drafts: first.drafts, guessed: first.guessed };
     /* 和读图一样：JSON 被截断时按对象逐个捞，别整段丢掉 */
     const salvaged = salvageItems(raw);
     if (salvaged.length) {
       const again = normalizeLlmItems(salvaged, now);
-      if (again.drafts.length) {
-        llmDrafts = again.drafts;
-        guessed = again.guessed;
+      if (again.drafts.length) return { raw, drafts: again.drafts, guessed: again.guessed };
+    }
+    return { raw, drafts: [], guessed: 0 };
+  };
+
+  let firstAsk: Ask;
+  try {
+    firstAsk = await askOnce(body);
+  } catch (err) {
+    const msg = err instanceof LlmError ? err.message : (err as Error)?.message ?? String(err);
+    return ruleOutcome(text, now, `模型没答上来（${msg}），先用规则识别`);
+  }
+  let llmDrafts = firstAsk.drafts;
+  let guessed = firstAsk.guessed;
+  let partsAdded = 0;
+
+  /*
+   * 自检：原文按行 / 句切出来有 2~4 段，模型却只给了一条，多半是漏了。
+   * 那就逐段再问一遍，把缺的补回来——多花几次小请求，但只在疑似漏条时才发生。
+   */
+  const segs = splitSegments(body);
+  if (segs.length >= 2 && segs.length <= 4 && llmDrafts.length < segs.length) {
+    const grew = llmDrafts.slice();
+    for (const seg of segs) {
+      try {
+        const part = await askOnce(seg);
+        guessed += part.guessed;
+        for (const d of part.drafts) {
+          if (grew.some((m) => sameHomeworkTitle(m.title, d.title))) continue;
+          if (grew.length >= MAX_ITEMS) break;
+          grew.push(d);
+          partsAdded += 1;
+        }
+      } catch {
+        /* 某一段问失败就算了，已经拿到的照常用 */
       }
+    }
+    llmDrafts = grew;
+  } else if (llmDrafts.length === 1 && /和|、|还有|另外|同时|以及/.test(body)) {
+    /*
+     * 只有一句、但里面有并列词、模型只给了一条：再确认一遍。
+     * 提示写清楚「真的只有一条就还是一条」，免得把一条拆成两条。
+     */
+    try {
+      const again = await askOnce(
+        body,
+        '（注意：这句话里可能有两件要交的事，用「和」「、」「还有」连着的通常是两条；但真的只有一条就还是一条，别硬拆。）',
+      );
+      guessed += again.guessed;
+      const grew = llmDrafts.slice();
+      for (const d of again.drafts) {
+        if (grew.some((m) => sameHomeworkTitle(m.title, d.title))) continue;
+        if (grew.length >= MAX_ITEMS) break;
+        grew.push(d);
+        partsAdded += 1;
+      }
+      llmDrafts = grew;
+    } catch {
+      /* 再问失败就用第一次的结果 */
     }
   }
   if (!llmDrafts.length) {
@@ -298,6 +374,11 @@ export async function parseHomeworkSmart(text: string, opts: HwParseOptions = {}
   for (const rule of parseHomework(text, now)) {
     if (added >= MAX_ITEMS - merged.length) break;
     if (merged.some((d) => sameHomeworkTitle(d.title, rule.title) || d.dueAt === rule.dueAt)) continue;
+    /*
+     * 规则偶尔会把整句话原样当标题（没认出课程、也没削掉「周五前交」这类尾巴）。
+     * 模型已经出了条目时，这种又长又没课程名的句子多半是同一件事的碎片，别当成新作业。
+     */
+    if (rule.title.length >= 10 && !rule.course) continue;
     merged.push(rule);
     added += 1;
   }
@@ -305,6 +386,7 @@ export async function parseHomeworkSmart(text: string, opts: HwParseOptions = {}
   const label = resolveProvider(settings.provider).label;
   const bits: string[] = [`${label} 识别`];
   if (added) bits.push(`规则补了 ${added} 条`);
+  if (partsAdded) bits.push(`分段补了 ${partsAdded} 条`);
   const endedCnt = merged.filter((d) => d.dueAt < now).length;
   if (endedCnt) bits.push(`${endedCnt} 条截止时间已经过了，加进去会算逾期`);
   if (guessed) bits.push(`${guessed} 条没写清截止，先按明天 23:59`);

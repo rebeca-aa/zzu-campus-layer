@@ -499,6 +499,9 @@ const COURSE_NOISE = new Set([
 ]);
 
 /** 从一句话里猜课程名；猜不到返回 undefined（宁可空着） */
+/** 以时间词开头的片段不是课程名（「周五前把…」「明天…」） */
+const TIME_PREFIX = /^(?:周[一二三四五六日天]|下周|下下周|星期[一二三四五六日天]?|今天|明天|后天|大后天|今晚|明晚|这周|本周|\d)/;
+
 export function guessCourse(sentence: string): string | undefined {
   const s = sentence
     .replace(/@所有人|@全体成员/g, ' ')
@@ -515,14 +518,23 @@ export function guessCourse(sentence: string): string | undefined {
   const m = /^([^\s，,。:：、；;！!]{2,10}?)\s*(?:课)?\s*(?:作业本|作业|实验报告|报告|小论文|论文|作文|习题)/.exec(s);
   if (m) {
     const name = m[1]!.replace(/^[\s\d.、)．]+/, '');
-    if (name && name.length >= 2 && !COURSE_NOISE.has(name) && !/^\d+$/.test(name)) return name.slice(0, 20);
+    /* 「周五前把…习题册」这种，抓到的前缀是时间词，不是课程名 */
+    if (
+      name &&
+      name.length >= 2 &&
+      !COURSE_NOISE.has(name) &&
+      !/^\d+$/.test(name) &&
+      !TIME_PREFIX.test(name)
+    ) {
+      return name.slice(0, 20);
+    }
   }
   /* 高数：周五交作业 —— 冒号前面像课程名的 */
   const colon = /^([^\s，,。:：、；;]{2,8})\s*[:：]/.exec(s);
   if (colon) {
     const name = colon[1]!;
     /* 「周五：」「作业：」这种不是课程名 */
-    if (!COURSE_NOISE.has(name) && !/^[周星期]/.test(name) && /[\u4e00-\u9fa5]/.test(name)) return name.slice(0, 20);
+    if (!COURSE_NOISE.has(name) && !TIME_PREFIX.test(name) && /[\u4e00-\u9fa5]/.test(name)) return name.slice(0, 20);
   }
   return undefined;
 }
