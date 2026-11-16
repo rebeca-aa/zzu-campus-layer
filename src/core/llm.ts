@@ -63,9 +63,12 @@ export const LLM_PROVIDERS: LlmProvider[] = [
     id: 'deepseek',
     label: 'DeepSeek 官方',
     baseUrl: 'https://api.deepseek.com',
-    model: 'deepseek-chat',
+    // V4.1 Flash（deepseek-flash）原生多模态：文字、看图、工具调用一个模型全包，
+    // 所以预设与识图模型都用它。旧名 deepseek-v4-flash / -vision-exp 官方会路由过来。
+    model: 'deepseek-flash',
+    vision: 'deepseek-flash',
     supportsTools: true,
-    hint: 'deepseek-chat（v4 代）支持工具调用，快且便宜，推荐（看图要换别的服务商）。',
+    hint: 'deepseek-flash（V4.1 Flash）原生多模态：看图、调工具、写作都是一个模型，快且便宜，推荐。',
   },
   {
     id: 'siliconflow',
@@ -143,8 +146,13 @@ interface ChatMessage {
   content: string | ContentPart[];
 }
 
-/** 模型名里带这些的，基本都能看图（各家的命名都不一样，只能猜个大概） */
-const VISION_NAME = /(?:^|[/_-])(?:vl|vision|omni)(?:[/_.-]|$)|glm-4v|gpt-4o|gpt-4\.1|gemini|claude-3|internvl|pixtral|qwen2\.5-vl|qvq/i;
+/**
+ * 模型名里带这些的，基本都能看图（各家的命名都不一样，只能猜个大概）。
+ * `deepseek-flash` 是 V4.1 Flash 的正式名（原生多模态），旧名 deepseek-v4-flash /
+ * deepseek-v4-flash-vision-exp 官方还在路由，所以三个都认。
+ */
+const VISION_NAME =
+  /(?:^|[/_-])(?:vl|vision|omni)(?:[/_.-]|$)|glm-4v|gpt-4o|gpt-4\.1|gemini|claude-3|internvl|pixtral|qwen2\.5-vl|qvq|deepseek-(?:v4(?:\.1)?-)?flash/i;
 
 /** 这个模型名看起来能不能读图 */
 export function canSeeImages(model: string): boolean {
@@ -160,9 +168,9 @@ export interface VisionTarget {
 
 /**
  * 决定「读图用哪个模型」：
- *  1. 用户配的模型本来就认图 → 直接用；
+ *  1. 用户配的模型本来就认图 → 直接用（DeepSeek 官方 deepseek-flash、硅基流动 VL 这些）；
  *  2. 服务商预设里有识图模型 → 换成它（同一个 key）；
- *  3. 都没有（比如 DeepSeek 官方、学校 R1）→ null，界面提示换服务商。
+ *  3. 都没有（学校 R1、deepseek-chat 这类纯文字模型所在的服务商）→ null，界面提示换服务商。
  */
 export function visionModelFor(
   cfg: Pick<LlmSettings, 'provider' | 'apiKey' | 'model'>,

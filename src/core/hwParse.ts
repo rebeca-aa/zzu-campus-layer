@@ -309,7 +309,7 @@ export async function parseHomeworkFromImages(
     return {
       drafts: [],
       via: 'llm',
-      note: '读图要靠模型：去「我的 → 模型」填一个支持看图的 Key（硅基流动、百炼、智谱、Moonshot、OpenRouter 都行）',
+      note: '读图要靠模型：去「我的 → 模型」填一个支持看图的 Key（DeepSeek 官方、硅基流动、百炼、智谱、Moonshot、OpenRouter 都行）',
     };
   }
   const target = visionModelFor(settings);
@@ -317,7 +317,7 @@ export async function parseHomeworkFromImages(
     return {
       drafts: [],
       via: 'llm',
-      note: `${label} 这边没有能看图的模型（它只能读文字）：换硅基流动 / 百炼 / 智谱 / Moonshot / OpenRouter 再试`,
+      note: `${label} 这边没有能看图的模型（它只能读文字）：换 DeepSeek 官方 / 硅基流动 / 百炼 / 智谱 / Moonshot / OpenRouter 再试`,
     };
   }
 

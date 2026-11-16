@@ -167,7 +167,7 @@ npm run build                  # 产物在 dist/（这个目录不进仓库，�
 | 预设 | 接口 | 默认模型 | 前提 |
 | --- | --- | --- | --- |
 | 学校 DeepSeek | `http://chat.zzu.edu.cn/api` | `DeepSeek-R1` | 只在校园网/VPN；页面必须是 http（HTTPS 会被混合内容拦） |
-| DeepSeek 官方 | `https://api.deepseek.com` | `deepseek-chat` | 自己的 key，HTTPS 可用 |
+| DeepSeek 官方 | `https://api.deepseek.com` | `deepseek-flash` | 自己的 key，HTTPS 可用；V4.1 Flash 原生多模态，看图 / 调工具都是它 |
 | 硅基流动 | `https://api.siliconflow.cn/v1` | `Qwen/Qwen2.5-7B-Instruct` | 同上 |
 | 阿里百炼 | `https://dashscope.aliyuncs.com/compatible-mode/v1` | `qwen-plus` | 同上 |
 | Moonshot | `https://api.moonshot.cn/v1` | `moonshot-v1-8k` | 同上 |

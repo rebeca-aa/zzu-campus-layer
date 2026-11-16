@@ -131,7 +131,7 @@ describe('llmChat', () => {
     );
     await llmChat({ provider: 'deepseek', apiKey: 'sk-x', model: '' }, [{ role: 'user', content: 'hi' }]);
     expect(calls[0]?.url).toBe('https://api.deepseek.com/chat/completions');
-    expect(JSON.parse(String(calls[0]?.init.body))).toMatchObject({ model: 'deepseek-chat' });
+    expect(JSON.parse(String(calls[0]?.init.body))).toMatchObject({ model: 'deepseek-flash' });
 
     await llmChat({ provider: 'siliconflow', apiKey: 'sk-x', model: '' }, [{ role: 'user', content: 'hi' }]);
     expect(calls[1]?.url).toBe('https://api.siliconflow.cn/v1/chat/completions');
@@ -351,6 +351,9 @@ describe('识图：模型能不能看图', () => {
     expect(canSeeImages('deepseek-chat')).toBe(false);
     expect(canSeeImages('moonshot-v1-8k')).toBe(false);
     expect(canSeeImages('DeepSeek-R1')).toBe(false);
+    /* V4.1 Flash 原生多模态：正式名与被官方路由的旧名都认 */
+    expect(canSeeImages('deepseek-flash')).toBe(true);
+    expect(canSeeImages('deepseek-v4-flash-vision-exp')).toBe(true);
   });
 
   it('用户配的模型看不了图，就换成同服务商的识图模型', () => {
@@ -363,9 +366,16 @@ describe('识图：模型能不能看图', () => {
       model: 'Qwen/Qwen2.5-VL-32B',
       switched: false,
     });
-    /* 学校 R1 和 DeepSeek 官方都没有识图模型 */
+    /* 学校 R1 没有识图模型；DeepSeek 官方现在有 deepseek-flash */
     expect(visionModelFor({ provider: 'school', apiKey: 'k', model: 'DeepSeek-R1' })).toBeNull();
-    expect(visionModelFor({ provider: 'deepseek', apiKey: 'k', model: 'deepseek-chat' })).toBeNull();
+    expect(visionModelFor({ provider: 'deepseek', apiKey: 'k', model: 'deepseek-chat' })).toEqual({
+      model: 'deepseek-flash',
+      switched: true,
+    });
+    expect(visionModelFor({ provider: 'deepseek', apiKey: 'k', model: 'deepseek-flash' })).toEqual({
+      model: 'deepseek-flash',
+      switched: false,
+    });
   });
 });
 

@@ -190,14 +190,30 @@ describe('parseHomeworkFromImages：读截图', () => {
     const noKey = await parseHomeworkFromImages([IMG], { now: NOW, settings: { ...VISION, apiKey: '' }, chat });
     expect(noKey.drafts).toHaveLength(0);
     expect(noKey.note).toContain('支持看图的 Key');
-    const deepseek = await parseHomeworkFromImages([IMG], {
+    const noVision = await parseHomeworkFromImages([IMG], {
+      now: NOW,
+      settings: { enabled: true, provider: 'school', apiKey: 'sk-x', model: 'DeepSeek-R1' },
+      chat,
+    });
+    expect(noVision.drafts).toHaveLength(0);
+    expect(noVision.note).toContain('没有能看图的模型');
+    expect(called).toBe(false);
+  });
+
+  it('DeepSeek 官方：配的是纯文字模型，也会换成 deepseek-flash 读图', async () => {
+    const chat = async (_prompt: string, _images: string[], model: string) => {
+      got = model;
+      return '{"items":[{"title":"高数习题","due":"2026-11-20T23:59:00+08:00"}]}';
+    };
+    let got = '';
+    const out = await parseHomeworkFromImages([IMG], {
       now: NOW,
       settings: { enabled: true, provider: 'deepseek', apiKey: 'sk-x', model: 'deepseek-chat' },
       chat,
     });
-    expect(deepseek.drafts).toHaveLength(0);
-    expect(deepseek.note).toContain('没有能看图的模型');
-    expect(called).toBe(false);
+    expect(got).toBe('deepseek-flash');
+    expect(out.drafts).toHaveLength(1);
+    expect(out.note).toContain('顺手换了识图模型');
   });
 
   it('模型不认图时把原话带出来', async () => {

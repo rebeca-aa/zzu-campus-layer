@@ -4,7 +4,7 @@
  * 只负责「展示 + 收集」，不碰存储：父组件传 `value` 与 `onChange`，
  * 由各自决定写哪个 KV（扩展走 chrome.storage，手机走 localStorage）。
  */
-import { LLM_PROVIDERS, resolveProvider, type LlmSettings } from '../core/llm';
+import { canSeeImages, LLM_PROVIDERS, resolveProvider, type LlmSettings } from '../core/llm';
 
 interface Props {
   value: LlmSettings;
@@ -16,6 +16,8 @@ interface Props {
 export function LlmFields({ value, onChange, httpsPage = false }: Props) {
   const provider = resolveProvider(value.provider);
   const blocked = httpsPage && provider.baseUrl.startsWith('http:');
+  // 填的模型看不了图、但这家有识图模型：提前说一声，别等用「读图」才发现换了模型
+  const visionSwap = provider.vision && value.model.trim() && !canSeeImages(value.model);
   return (
     <div class="llm-fields">
       <label class="toggle">
@@ -70,6 +72,9 @@ export function LlmFields({ value, onChange, httpsPage = false }: Props) {
         </p>
       ) : null}
       {provider.hint ? <p class="hint">{provider.hint}</p> : null}
+      {visionSwap ? (
+        <p class="hint">这个模型只能读文字；用「读图」认作业时会自动换成 {provider.vision}（同一个 Key）。</p>
+      ) : null}
     </div>
   );
 }
