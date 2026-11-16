@@ -2830,3 +2830,15 @@ html[data-theme='cream'] .hw-chip b.bad { color: #b4342f; }
   line-height: 1.7;
   color: var(--dim);
 }
+
+/* 识别 / 读图失败的提示块：.hw-note 是草稿下面的灰字，这里要更显眼一点 */
+.hw-alert {
+  margin: 9px 0 0;
+  padding: 9px 11px;
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--warn) 34%, var(--line));
+  background: color-mix(in srgb, var(--warn) 10%, transparent);
+  color: color-mix(in srgb, var(--warn) 82%, var(--text));
+  font-size: 12px;
+  line-height: 1.55;
+}

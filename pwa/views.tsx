@@ -2319,6 +2319,11 @@ export function HomeworkView(props: HomeworkViewProps) {
         <p class="hw-src">
           配了模型就让模型读（拆条、挑课程、算截止都准），没配才走规则；截图直接点「读图」，一次能挑好几张。
         </p>
+        {/*
+          失败提示必须挂在这里：原来只在「识别到 N 条」里面显示，于是读图超时、壳太旧、
+          读不出图这些情况全都静默——用户看到的就是「点了没反应」。
+        */}
+        {parseNote && !(drafts && drafts.length > 0) && <p class="hw-alert">{parseNote}</p>}
 
         {manualOpen && (
           <div class="hw-manual">
