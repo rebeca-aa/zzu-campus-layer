@@ -531,7 +531,7 @@ function draftOf(bars: HomeBar[]): BarDraft[] {
   });
 }
 
-type BarGlyphName = 'book' | 'room' | 'card' | 'wx' | 'chat' | 'hw' | 'memo';
+type BarGlyphName = 'book' | 'room' | 'card' | 'wx' | 'chat' | 'hw' | 'memo' | 'plus';
 
 function BarGlyph({ name }: { name: BarGlyphName }) {
   const common = {
@@ -569,6 +569,14 @@ function BarGlyph({ name }: { name: BarGlyphName }) {
       <svg {...common}>
         <rect x="3.5" y="5.5" width="17" height="13" rx="2.4" />
         <path d="M3.5 10h17M7 14.5h4" />
+      </svg>
+    );
+  }
+  if (name === 'plus') {
+    return (
+      <svg {...common}>
+        <circle cx="12" cy="12" r="8.4" />
+        <path d="M12 8.2v7.6M8.2 12h7.6" />
       </svg>
     );
   }
@@ -871,6 +879,9 @@ function HomeBars(props: {
           onClick={() => props.onPick(bar.text)}
           title={bar.text === bar.label ? undefined : bar.text}
         >
+          <span class="bar-ic">
+            <BarGlyph name="plus" />
+          </span>
           <span class="bar-txt">
             <span class="bar-t">{bar.label}</span>
             <span class="bar-s">{bar.text}</span>
