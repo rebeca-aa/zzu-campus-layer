@@ -591,25 +591,35 @@ function HomeBars(props: {
   /* null = 设置窗关着；数组里是正在编辑的整份列表 */
   const [sheet, setSheet] = useState<BarDraft[] | null>(null);
   const [error, setError] = useState('');
-  /* 天气块的小字：读到缓存的实时天气就显示「晴 · 12°」，拉不到保持默认文案 */
-  const [wxLine, setWxLine] = useState('看看天气');
+  /* 天气条的小字：直接显示当日实时气温和天气（「晴 · 12°」）；拿不到就先空着，不留废话 */
+  const [wxLine, setWxLine] = useState('');
   useEffect(() => {
     let alive = true;
-    void loadWeather().then(
-      (wx) => {
-        if (alive) setWxLine(`${wx.now.label} · ${Math.round(wx.now.temp)}°`);
-      },
-      () => {
-        /* 失败不提示，进天气页能看到完整错误 */
-      },
-    );
+    const load = () =>
+      loadWeather().then(
+        (wx) => {
+          if (alive) setWxLine(`${wx.now.label} · ${Math.round(wx.now.temp)}°`);
+        },
+        () => {
+          /* 失败不提示，进天气页能看到完整错误 */
+        },
+      );
+    void load();
+    /* 手机网络偶尔抽风：10 秒后再补拉一次，成功就把实时气温填上 */
+    const retry = window.setTimeout(() => {
+      if (alive) void load();
+    }, 10_000);
     return () => {
       alive = false;
+      window.clearTimeout(retry);
     };
   }, []);
 
   const builtinBars = props.bars.filter(isBuiltinBar);
   const customBars = props.bars.filter((bar) => !isBuiltinBar(bar));
+  /* 有 logo 的四条（图书馆 / 校园卡 / 天气 / 作业）置顶，空教室没有 logo 排后面 */
+  const withLogo = builtinBars.filter((bar) => barGlyphOf(bar) !== 'room');
+  const withoutLogo = builtinBars.filter((bar) => barGlyphOf(bar) === 'room');
 
   const openSheet = () => {
     setError('');
@@ -700,7 +710,8 @@ function HomeBars(props: {
         </button>
       </div>
       <div class="bars-grid">
-        {builtinBars.map((bar) =>
+        {/* 有 logo 的先排：图书馆、校园卡 */}
+        {withLogo.map((bar) =>
           isCardBar(bar) ? (
             <button
               type="button"
@@ -725,12 +736,9 @@ function HomeBars(props: {
               onClick={() => props.onPick(bar.text)}
               title={bar.text === bar.label ? undefined : bar.text}
             >
-              {/* 空教室不要 logo，直接文字起头 */}
-              {barGlyphOf(bar) === 'room' ? null : (
-                <span class="bar-ic">
-                  <BarGlyph name={barGlyphOf(bar)} />
-                </span>
-              )}
+              <span class="bar-ic">
+                <BarGlyph name={barGlyphOf(bar)} />
+              </span>
               <span class="bar-txt">
                 <span class="bar-t">{bar.label}</span>
                 <span class="bar-s">{bar.text}</span>
@@ -738,17 +746,17 @@ function HomeBars(props: {
             </button>
           ),
         )}
-        {/* 天气也排成一条，和上面几栏一个样式 */}
+        {/* 天气：小字直接是当日实时气温和天气 */}
         <button type="button" class="bar" onClick={props.onWeather}>
           <span class="bar-ic">
             <BarGlyph name="wx" />
           </span>
           <span class="bar-txt">
             <span class="bar-t">天气</span>
-            <span class="bar-s">{wxLine}</span>
+            {wxLine ? <span class="bar-s">{wxLine}</span> : null}
           </span>
         </button>
-        {/* 作业也排成一条，红点表示有逾期 */}
+        {/* 作业：红点表示有逾期 */}
         <button type="button" class={`bar bar-tile-hw${props.hwDot ? ' alert' : ''}`} onClick={props.onHomework}>
           {props.hwDot ? <span class="bar-dot" /> : null}
           <span class="bar-ic">
@@ -759,6 +767,21 @@ function HomeBars(props: {
             <span class="bar-s">{props.hwText}</span>
           </span>
         </button>
+        {/* 空教室没有 logo，排在四条有 logo 的后面 */}
+        {withoutLogo.map((bar) => (
+          <button
+            type="button"
+            class="bar"
+            key={bar.id}
+            onClick={() => props.onPick(bar.text)}
+            title={bar.text === bar.label ? undefined : bar.text}
+          >
+            <span class="bar-txt">
+              <span class="bar-t">{bar.label}</span>
+              <span class="bar-s">{bar.text}</span>
+            </span>
+          </button>
+        ))}
       </div>
       {customBars.map((bar) => (
         <button
