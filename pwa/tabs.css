@@ -2842,3 +2842,15 @@ html[data-theme='cream'] .hw-chip b.bad { color: #b4342f; }
   font-size: 12px;
   line-height: 1.55;
 }
+
+/* 草稿里截止时间已经过去的那条：先说清楚，免得加进去才发现是逾期 */
+.hw-ended {
+  margin: 0 0 7px;
+  padding: 7px 10px;
+  border-radius: 9px;
+  border: 1px solid color-mix(in srgb, var(--warn) 32%, var(--line));
+  background: color-mix(in srgb, var(--warn) 9%, transparent);
+  color: color-mix(in srgb, var(--warn) 80%, var(--text));
+  font-size: 11.5px;
+  line-height: 1.5;
+}

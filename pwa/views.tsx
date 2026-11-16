@@ -2376,6 +2376,9 @@ export function HomeworkView(props: HomeworkViewProps) {
             {parseNote && <p class="hw-src">{parseNote}</p>}
             {drafts.map((d, i) => (
               <div class="hw-draft" key={`${d.title}-${i}`}>
+                {d.dueAt < Date.now() && (
+                  <p class="hw-ended">这条的截止时间已经过了（{dueText(d.dueAt, Date.now())}），加进去会显示成「已逾期」</p>
+                )}
                 <input
                   value={d.title}
                   onInput={(e) => {

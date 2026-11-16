@@ -92,6 +92,54 @@ function extractJson(raw: string): unknown {
   }
 }
 
+/**
+ * 从可能被截断 / 夹了废话的回复里捞出完整的条目对象。
+ * 模型写到一半被 max_tokens 掐断时，整段 JSON.parse 会失败，
+ * 但前面几条其实都是完整的——按大括号配对扫，能捞一条是一条。
+ */
+function salvageItems(text: string): unknown[] {
+  const out: unknown[] = [];
+  const isTitle = (o: Record<string, unknown>): boolean =>
+    ['title', 'name', 'content', 'text'].some((k) => typeof o[k] === 'string' && String(o[k]).trim());
+  for (let i = 0; i < text.length; i += 1) {
+    if (text[i] !== '{') continue;
+    let depth = 0;
+    let inStr = false;
+    let esc = false;
+    let end = -1;
+    for (let j = i; j < text.length; j += 1) {
+      const c = text[j];
+      if (inStr) {
+        if (esc) esc = false;
+        else if (c === '\\') esc = true;
+        else if (c === '"') inStr = false;
+        continue;
+      }
+      if (c === '"') inStr = true;
+      else if (c === '{') depth += 1;
+      else if (c === '}') {
+        depth -= 1;
+        if (depth === 0) {
+          end = j;
+          break;
+        }
+      }
+    }
+    /* 这一段没配对（整个外壳被截断）就继续从里面找，别整段放弃 */
+    if (end < 0) continue;
+    try {
+      const obj = JSON.parse(text.slice(i, end + 1)) as unknown;
+      if (obj && typeof obj === 'object' && !Array.isArray(obj) && isTitle(obj as Record<string, unknown>)) {
+        out.push(obj);
+        i = end;
+      }
+      /* 不是条目（比如最外层的 {"items":[...]}）就继续扫里面 */
+    } catch {
+      /* 这一段不是合法对象，继续往后扫 */
+    }
+  }
+  return out;
+}
 const oneLine = (s: string): string => s.replace(/\s+/g, ' ').trim();
 
 /** 「高数作业：」这种前缀去掉，课程名已经单列在 course 里了。
@@ -227,7 +275,19 @@ export async function parseHomeworkSmart(text: string, opts: HwParseOptions = {}
     return ruleOutcome(text, now, `模型没答上来（${msg}），先用规则识别`);
   }
 
-  const { drafts: llmDrafts, guessed } = normalizeLlmItems(extractJson(raw), now);
+  const parsedText = extractJson(raw);
+  let { drafts: llmDrafts, guessed } = normalizeLlmItems(parsedText, now);
+  if (!llmDrafts.length) {
+    /* 和读图一样：JSON 被截断时按对象逐个捞，别整段丢掉 */
+    const salvaged = salvageItems(raw);
+    if (salvaged.length) {
+      const again = normalizeLlmItems(salvaged, now);
+      if (again.drafts.length) {
+        llmDrafts = again.drafts;
+        guessed = again.guessed;
+      }
+    }
+  }
   if (!llmDrafts.length) {
     return ruleOutcome(text, now, '模型说这段里没有能定的作业，改用规则识别');
   }
@@ -245,6 +305,8 @@ export async function parseHomeworkSmart(text: string, opts: HwParseOptions = {}
   const label = resolveProvider(settings.provider).label;
   const bits: string[] = [`${label} 识别`];
   if (added) bits.push(`规则补了 ${added} 条`);
+  const endedCnt = merged.filter((d) => d.dueAt < now).length;
+  if (endedCnt) bits.push(`${endedCnt} 条截止时间已经过了，加进去会算逾期`);
   if (guessed) bits.push(`${guessed} 条没写清截止，先按明天 23:59`);
   return { drafts: merged, via: 'llm', note: bits.join(' · ') };
 }
@@ -328,7 +390,7 @@ export async function parseHomeworkFromImages(
         { provider: settings.provider, apiKey: settings.apiKey, model: settings.model },
         prompt,
         imgs,
-        { model, maxTokens: 2000, temperature: 0, timeoutMs: opts.timeoutMs ?? 45_000 },
+        { model, maxTokens: 4000, temperature: 0, timeoutMs: opts.timeoutMs ?? 45_000 },
       ));
 
   type Attempt = { raw: string; drafts: HomeworkDraft[]; guessed: number; empty: boolean };
@@ -336,8 +398,17 @@ export async function parseHomeworkFromImages(
     const raw = await chat(prompt, list, target.model);
     const parsed = extractJson(raw);
     const entries = Array.isArray(parsed) ? parsed : (parsed as { items?: unknown[] })?.items;
-    const { drafts, guessed } = normalizeLlmItems(parsed, now);
-    return { raw, drafts, guessed, empty: Array.isArray(entries) && entries.length === 0 };
+    const first = normalizeLlmItems(parsed, now);
+    if (first.drafts.length) return { raw, drafts: first.drafts, guessed: first.guessed, empty: false };
+    /* 整段解析失败或被截断时，按对象逐个捞（模型常常只差最后几个字符） */
+    const salvaged = salvageItems(raw);
+    if (salvaged.length) {
+      const again = normalizeLlmItems(salvaged, now);
+      if (again.drafts.length) {
+        return { raw, drafts: again.drafts, guessed: again.guessed, empty: false };
+      }
+    }
+    return { raw, drafts: [], guessed: 0, empty: Array.isArray(entries) && entries.length === 0 };
   };
 
   let best: Attempt;
@@ -379,6 +450,8 @@ export async function parseHomeworkFromImages(
     `${label} 的 ${target.model.split('/').pop() ?? target.model} 读的${list.length > 1 ? ` ${list.length} 张图` : '图'}`,
   ];
   if (target.switched) bits.push(`你配的 ${settings.model || '默认模型'} 看不了图，顺手换了识图模型`);
+  const ended = drafts.filter((d) => d.dueAt < now).length;
+  if (ended) bits.push(`${ended} 条截止时间已经过了，加进去会算逾期`);
   if (guessed) bits.push(`${guessed} 条没写清截止，先按明天 23:59`);
   bits.push(`共 ${drafts.length} 条`);
   return { drafts, via: 'llm', note: bits.join(' · ') };

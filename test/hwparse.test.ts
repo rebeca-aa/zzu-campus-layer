@@ -258,4 +258,25 @@ describe('parseHomeworkFromImages：读截图', () => {
     expect(out.drafts).toHaveLength(0);
     expect(out.note).toContain('空内容');
   });
+  it('JSON 被截断时，把前面完整的几条捞出来', async () => {
+    const cut = '{"items":[{"title":"iWrite3","course":"英语","due":"2026-11-14T23:59:00+08:00"},{"title":"大物实验报告","course":"大物","due":"2026-11-20T23:59:00+08:00"},{"title":"英语作文二","cou';
+    const chat = async () => cut;
+    const out = await parseHomeworkFromImages([IMG], { now: NOW, settings: VISION, chat });
+    expect(out.drafts).toHaveLength(2);
+    expect(out.drafts.map((d) => d.title)).toEqual(['iWrite3', '大物实验报告']);
+  });
+
+  it('整段 JSON 都坏了也能捞出带 title 的对象', async () => {
+    const chat = async () => '好的：{"title":"iWrite3","course":"英语","due":"2026-11-14T23:59:00+08:00"} 就这些';
+    const out = await parseHomeworkFromImages([IMG], { now: NOW, settings: VISION, chat });
+    expect(out.drafts).toHaveLength(1);
+    expect(out.drafts[0]?.course).toBe('英语');
+  });
+  it('截止已经过去的条目照样出草稿，并在说明里点出来', async () => {
+    const chat = async () => '{"items":[{"title":"iWrite3","course":"英语","due":"2026-11-10T23:59:00+08:00"}]}';
+    const out = await parseHomeworkFromImages([IMG], { now: NOW, settings: VISION, chat });
+    expect(out.drafts).toHaveLength(1);
+    expect(out.drafts[0]?.dueAt).toBeLessThan(NOW);
+    expect(out.note).toContain('截止时间已经过了');
+  });
 });
