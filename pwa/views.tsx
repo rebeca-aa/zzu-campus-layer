@@ -2118,6 +2118,10 @@ async function fileToDataUrl(file: File): Promise<string> {
     ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
     return canvas.toDataURL('image/jpeg', 0.82);
   } catch {
+    // WebView 里解不开的格式（华为相机常出 HEIC）就别把原图硬发出去，模型会直接拒
+    if (!/^data:image\/(png|jpe?g|webp|gif);/i.test(raw)) {
+      throw new Error('这张图打不开：换成 JPG / PNG 再试（相机原图如果是 HEIC 就常见这个）');
+    }
     return raw;
   }
 }
@@ -2267,21 +2271,29 @@ export function HomeworkView(props: HomeworkViewProps) {
           <button class="primary" disabled={!paste.trim() || busy} onClick={() => void doParse()}>
             {busy ? '识别中…' : '识别'}
           </button>
-          <button class="ghost" disabled={imgBusy} onClick={() => fileRef.current?.click()}>
-            {imgBusy ? '读图中…' : '读图'}
-          </button>
+          {/*
+            读图 = 一个真按钮 + 盖在上面的透明 file input：点到的其实是原生 input，
+            不靠脚本 click()，安卓壳（含鸿蒙上的 APK）里最稳，样式仍是普通 ghost 按钮。
+          */}
+          <div class="hw-img-btn">
+            <button class="ghost" type="button" disabled={imgBusy}>
+              {imgBusy ? '读图中…' : '读图'}
+            </button>
+            <input
+              ref={fileRef}
+              type="file"
+              accept="image/*"
+              multiple
+              class="hw-img-input"
+              disabled={imgBusy}
+              aria-label="读图"
+              onChange={(e) => void doImage((e.currentTarget as HTMLInputElement).files)}
+            />
+          </div>
           <button class="ghost" onClick={() => setManualOpen((v) => !v)}>
             {manualOpen ? '收起手填' : '手动填'}
           </button>
         </div>
-        <input
-          ref={fileRef}
-          type="file"
-          accept="image/*"
-          multiple
-          class="hw-img-input"
-          onChange={(e) => void doImage((e.currentTarget as HTMLInputElement).files)}
-        />
         <p class="hw-src">
           配了模型就让模型读（拆条、挑课程、算截止都准），没配才走规则；截图直接点「读图」，一次能挑好几张。
         </p>

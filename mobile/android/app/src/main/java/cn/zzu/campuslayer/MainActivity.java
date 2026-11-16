@@ -11,6 +11,8 @@ import android.os.Bundle;
 import android.view.ViewGroup;
 import android.webkit.CookieManager;
 import android.webkit.JavascriptInterface;
+import android.webkit.ValueCallback;
+import android.webkit.WebChromeClient;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
@@ -39,6 +41,10 @@ public class MainActivity extends Activity {
     private boolean renewing = false;
     private String PENDING_BOOK_REQ = null;
     private static final int REQ_LOGIN = 3001;
+    /** 网页里 <input type="file">（作业页「读图」）→ 系统选图 */
+    private static final int REQ_FILE_CHOOSER = 3004;
+    /** WebView 等我们回来的那次选图；同一时间只能有一份 */
+    private ValueCallback<Uri[]> fileChooser = null;
 
     private WebView web;
 
@@ -62,6 +68,47 @@ public class MainActivity extends Activity {
             @Override
             public boolean shouldOverrideUrlLoading(WebView view, String url) {
                 return false;
+            }
+        });
+
+        /*
+         * 网页里的 <input type="file"> 只有在壳实现 onShowFileChooser 之后才会弹系统选图：
+         * 不实现的话点「读图」没任何反应（不报错，就是不开）。华为 / 鸿蒙上同样如此，
+         * 不是鸿蒙特有的问题。这里把 params 给的意图交给系统，结果原路回给 WebView。
+         */
+        web.setWebChromeClient(new WebChromeClient() {
+            @Override
+            public boolean onShowFileChooser(WebView view, ValueCallback<Uri[]> callback,
+                                             FileChooserParams params) {
+                // 上一次还没回来就又点了：先把旧的收掉，免得泄漏回调
+                if (fileChooser != null) {
+                    try {
+                        fileChooser.onReceiveValue(null);
+                    } catch (Throwable ignored) {
+                    }
+                    fileChooser = null;
+                }
+                fileChooser = callback;
+                Intent intent;
+                try {
+                    // params 里已经带了 accept 类型、是否多选（accept="image/*" multiple → 多选）
+                    intent = params.createIntent();
+                } catch (Throwable e) {
+                    intent = new Intent(Intent.ACTION_GET_CONTENT);
+                    intent.addCategory(Intent.CATEGORY_OPENABLE);
+                    intent.setType("image/*");
+                    intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
+                }
+                try {
+                    startActivityForResult(intent, REQ_FILE_CHOOSER);
+                } catch (Throwable e) {
+                    // 系统里连个选图的应用都没有：回空，页面会提示「没拿到图片」
+                    fileChooser = null;
+                    callback.onReceiveValue(null);
+                    Toast.makeText(MainActivity.this, "没找到能选图的界面：装一个文件管理器再试", Toast.LENGTH_LONG).show();
+                    return false;
+                }
+                return true;
             }
         });
 
@@ -477,6 +524,22 @@ public class MainActivity extends Activity {
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
+
+        /* 选图回来：把结果交还给 WebView（取消也要回，否则页面会一直以为还在选） */
+        if (requestCode == REQ_FILE_CHOOSER) {
+            ValueCallback<Uri[]> cb = fileChooser;
+            fileChooser = null;
+            if (cb != null) {
+                Uri[] picked = null;
+                try {
+                    picked = WebChromeClient.FileChooserParams.parseResult(resultCode, data);
+                } catch (Throwable ignored) {
+                }
+                cb.onReceiveValue(picked);
+            }
+            return;
+        }
+
         if (requestCode == REQ_LIB_BOOK) {
             String req = PENDING_BOOK_REQ;
             PENDING_BOOK_REQ = null;
