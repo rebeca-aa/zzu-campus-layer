@@ -43,3 +43,27 @@ describe('add / update / remove', () => {
     expect(removeMemo([one('a', 1, 'a'), one('b', 2, 'b')], 'a').map((m) => m.id)).toEqual(['b']);
   });
 });
+
+describe('提醒时间', () => {
+  it('normalize 保留合法 remindAt，丢掉脏值', () => {
+    const list = normalizeMemos([
+      { id: 'a', text: '有提醒', createdAt: 1, updatedAt: 1, remindAt: 1700000000000 },
+      { id: 'b', text: '脏提醒', createdAt: 2, updatedAt: 2, remindAt: 'tomorrow' },
+      { id: 'c', text: '零提醒', createdAt: 3, updatedAt: 3, remindAt: 0 },
+    ]);
+    expect(list[0]!.remindAt).toBe(1700000000000);
+    expect(list[1]!.remindAt).toBeUndefined();
+    expect(list[2]!.remindAt).toBeUndefined();
+  });
+
+  it('新增可以带提醒，编辑可以改或清', () => {
+    const withRemind = addMemo([], '交作业', 1, 1700000000000);
+    expect(withRemind[0]!.remindAt).toBe(1700000000000);
+
+    const changed = updateMemo(withRemind, withRemind[0]!.id, '交作业', 2, 1800000000000);
+    expect(changed[0]!.remindAt).toBe(1800000000000);
+
+    const cleared = updateMemo(changed, changed[0]!.id, '交作业', 3, null);
+    expect(cleared[0]!.remindAt).toBeUndefined();
+  });
+});

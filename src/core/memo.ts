@@ -11,6 +11,8 @@ export interface Memo {
   text: string;
   createdAt: number;
   updatedAt: number;
+  /** 提醒时间（毫秒）；不设就是普通便签 */
+  remindAt?: number;
 }
 
 export const MEMO_KEY = 'memos';
@@ -40,23 +42,41 @@ export function normalizeMemos(raw: unknown): Memo[] {
     seen.add(id);
     const createdAt = typeof o.createdAt === 'number' && Number.isFinite(o.createdAt) ? o.createdAt : Date.now();
     const updatedAt = typeof o.updatedAt === 'number' && Number.isFinite(o.updatedAt) ? o.updatedAt : createdAt;
-    out.push({ id, text, createdAt, updatedAt });
+    const remindRaw = o.remindAt;
+    const remindAt =
+      typeof remindRaw === 'number' && Number.isFinite(remindRaw) && remindRaw > 0 ? remindRaw : undefined;
+    out.push({ id, text, createdAt, updatedAt, ...(remindAt ? { remindAt } : {}) });
     if (out.length >= MAX_MEMOS) break;
   }
   return out;
 }
 
 /** 新记录放最前面；超过上限丢最旧的 */
-export function addMemo(list: Memo[], text: string, now = Date.now()): Memo[] {
+export function addMemo(list: Memo[], text: string, now = Date.now(), remindAt?: number | null): Memo[] {
   const t = clean(text);
   if (!t) return list;
-  return [{ id: newMemoId(now), text: t, createdAt: now, updatedAt: now }, ...list].slice(0, MAX_MEMOS);
+  return [
+    { id: newMemoId(now), text: t, createdAt: now, updatedAt: now, ...(remindAt ? { remindAt } : {}) },
+    ...list,
+  ].slice(0, MAX_MEMOS);
 }
 
-export function updateMemo(list: Memo[], id: string, text: string, now = Date.now()): Memo[] {
+export function updateMemo(
+  list: Memo[],
+  id: string,
+  text: string,
+  now = Date.now(),
+  remindAt?: number | null,
+): Memo[] {
   const t = clean(text);
   if (!t) return removeMemo(list, id);
-  return list.map((m) => (m.id === id ? { ...m, text: t, updatedAt: now } : m));
+  return list.map((m) => {
+    if (m.id !== id) return m;
+    const next: Memo = { ...m, text: t, updatedAt: now };
+    if (remindAt) next.remindAt = remindAt;
+    else delete next.remindAt;
+    return next;
+  });
 }
 
 export function removeMemo(list: Memo[], id: string): Memo[] {

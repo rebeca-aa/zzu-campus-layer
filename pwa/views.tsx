@@ -1552,12 +1552,162 @@ function memoTime(ts: number): string {
   return `${p(d.getMonth() + 1)}/${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 
+const BellGlyph = ({ size = 16 }: { size?: number }) => (
+  <svg
+    viewBox="0 0 24 24"
+    width={size}
+    height={size}
+    fill="none"
+    stroke="currentColor"
+    stroke-width="1.7"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+    aria-hidden="true"
+  >
+    <path d="M6.4 16.4V11a5.6 5.6 0 0 1 11.2 0v5.4l1.5 2.1H4.9z" />
+    <path d="M10 20.2a2.1 2.1 0 0 0 4 0" />
+  </svg>
+);
+
+function memoRemindText(ts: number): string {
+  const d = new Date(ts);
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${p(d.getMonth() + 1)}/${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+function defaultRemind(): Date {
+  const d = new Date();
+  d.setDate(d.getDate() + 1);
+  d.setHours(9, 0, 0, 0);
+  return d;
+}
+
+function MemoPicker({
+  value,
+  onClose,
+  onConfirm,
+}: {
+  value: number | null;
+  onClose: () => void;
+  onConfirm: (ts: number | null) => void;
+}) {
+  const init = value ? new Date(value) : defaultRemind();
+  const [y, setY] = useState(init.getFullYear());
+  const [mo, setMo] = useState(init.getMonth() + 1);
+  const [d, setD] = useState(init.getDate());
+  const [h, setH] = useState(init.getHours());
+  const [mi, setMi] = useState(init.getMinutes());
+  const dayCount = new Date(y, mo, 0).getDate();
+  const day = Math.min(d, dayCount);
+  const years = Array.from(
+    new Set([...Array.from({ length: 4 }, (_, i) => new Date().getFullYear() + i), y]),
+  ).sort((a, b) => a - b);
+  const preview = `${y}年${mo}月${day}日 周${'日一二三四五六'[new Date(y, mo - 1, day).getDay()]} ${String(h).padStart(2, '0')}:${String(mi).padStart(2, '0')}`;
+
+  const cell = (node: ComponentChildren, suffix: string) => (
+    <span class="mp-cell">
+      {node}
+      <em>{suffix}</em>
+    </span>
+  );
+
+  return createPortal(
+    <div
+      class="memo-picker-mask"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
+      <div class="memo-picker" role="dialog" aria-modal="true" aria-label="提醒时间">
+        <div class="mp-head">
+          <strong>提醒时间</strong>
+          <span>{preview}</span>
+        </div>
+        <div class="mp-row">
+          {cell(
+            <select value={y} onChange={(e) => setY(Number((e.target as HTMLSelectElement).value))}>
+              {years.map((v) => (
+                <option value={v} key={v}>
+                  {v}
+                </option>
+              ))}
+            </select>,
+            '年',
+          )}
+          {cell(
+            <select value={mo} onChange={(e) => setMo(Number((e.target as HTMLSelectElement).value))}>
+              {Array.from({ length: 12 }, (_, i) => i + 1).map((v) => (
+                <option value={v} key={v}>
+                  {v}
+                </option>
+              ))}
+            </select>,
+            '月',
+          )}
+          {cell(
+            <select value={day} onChange={(e) => setD(Number((e.target as HTMLSelectElement).value))}>
+              {Array.from({ length: dayCount }, (_, i) => i + 1).map((v) => (
+                <option value={v} key={v}>
+                  {v}
+                </option>
+              ))}
+            </select>,
+            '日',
+          )}
+          {cell(
+            <select value={h} onChange={(e) => setH(Number((e.target as HTMLSelectElement).value))}>
+              {Array.from({ length: 24 }, (_, i) => i).map((v) => (
+                <option value={v} key={v}>
+                  {String(v).padStart(2, '0')}
+                </option>
+              ))}
+            </select>,
+            '时',
+          )}
+          {cell(
+            <select value={mi} onChange={(e) => setMi(Number((e.target as HTMLSelectElement).value))}>
+              {Array.from({ length: 12 }, (_, i) => i * 5).map((v) => (
+                <option value={v} key={v}>
+                  {String(v).padStart(2, '0')}
+                </option>
+              ))}
+            </select>,
+            '分',
+          )}
+        </div>
+        <div class="mp-acts">
+          <button class="ghost" onClick={() => onConfirm(null)}>
+            清除
+          </button>
+          <span class="mp-space" />
+          <button class="ghost" onClick={onClose}>
+            取消
+          </button>
+          <button class="primary" onClick={() => onConfirm(new Date(y, mo - 1, day, h, mi).getTime())}>
+            确定
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
 export function MemoView({ onBack }: { onBack: () => void }) {
   const [memos, setMemos] = useState<Memo[] | null>(null);
   const [draft, setDraft] = useState('');
   const [editing, setEditing] = useState<string | null>(null);
   /* 删除不用 window.confirm：WebView 里它可能直接返回 false，改成点两下确认 */
   const [confirmId, setConfirmId] = useState<string | null>(null);
+  /* 提醒：编辑/新增时选好的时间，保存时写进记录 */
+  const [remindAt, setRemindAt] = useState<number | null>(null);
+  const [picker, setPicker] = useState(false);
+  /* 多选：长按任意一条进入，右侧出圆圈，底部出删除条 */
+  const [selecting, setSelecting] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [confirmBulk, setConfirmBulk] = useState(false);
+  const press = useRef<{ id: string; x: number; y: number; timer: number } | null>(null);
+  const suppressClick = useRef(false);
 
   useEffect(() => {
     let alive = true;
@@ -1570,6 +1720,39 @@ export function MemoView({ onBack }: { onBack: () => void }) {
     };
   }, []);
 
+  /* 到点提醒：应用开着时每 30 秒看一次，同一条只提醒一次 */
+  useEffect(() => {
+    if (!memos) return;
+    const check = () => {
+      const now = Date.now();
+      for (const m of memos) {
+        if (!m.remindAt || m.remindAt > now) continue;
+        const key = `campus-layer:memoReminded:${m.id}`;
+        try {
+          if (localStorage.getItem(key)) continue;
+          localStorage.setItem(key, '1');
+        } catch {
+          continue;
+        }
+        const tip = `备忘录提醒：${m.text.slice(0, 80)}`;
+        try {
+          window.dispatchEvent(new CustomEvent('campus-note', { detail: tip }));
+        } catch {
+          /* 没有 toast 监听就算了 */
+        }
+        const bridge = (window as unknown as { CampusNotify?: { notify?: (t: string, b: string) => void } }).CampusNotify;
+        try {
+          bridge?.notify?.('备忘录提醒', m.text.slice(0, 120));
+        } catch {
+          /* 忽略 */
+        }
+      }
+    };
+    check();
+    const timer = setInterval(check, 30_000);
+    return () => clearInterval(timer);
+  }, [memos]);
+
   const commit = (next: Memo[]) => {
     setMemos(next);
     void saveMemos(next);
@@ -1579,19 +1762,66 @@ export function MemoView({ onBack }: { onBack: () => void }) {
     const text = draft.trim();
     if (!text) return;
     if (editing) {
-      commit(updateMemo(memos ?? [], editing, text));
+      commit(updateMemo(memos ?? [], editing, text, Date.now(), remindAt));
       setEditing(null);
     } else {
-      commit(addMemo(memos ?? [], text));
+      commit(addMemo(memos ?? [], text, Date.now(), remindAt));
     }
     setDraft('');
+    setRemindAt(null);
   };
 
   const startEdit = (m: Memo) => {
     setConfirmId(null);
     setEditing(m.id);
     setDraft(m.text);
+    setRemindAt(m.remindAt ?? null);
     window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const enterSelect = (id: string) => {
+    suppressClick.current = true;
+    setSelecting(true);
+    setSelected(new Set([id]));
+    setConfirmBulk(false);
+    try {
+      navigator.vibrate?.(12);
+    } catch {
+      /* 不支持震动就算了 */
+    }
+  };
+
+  const exitSelect = () => {
+    setSelecting(false);
+    setSelected(new Set());
+    setConfirmBulk(false);
+  };
+
+  const toggleOne = (id: string) => {
+    setConfirmBulk(false);
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      if (next.size === 0) setSelecting(false);
+      return next;
+    });
+  };
+
+  const allSelected = (memos?.length ?? 0) > 0 && selected.size === memos?.length;
+  const toggleAll = () => {
+    setConfirmBulk(false);
+    setSelected(allSelected ? new Set() : new Set((memos ?? []).map((m) => m.id)));
+  };
+
+  const deleteSelected = () => {
+    if (!confirmBulk) {
+      setConfirmBulk(true);
+      return;
+    }
+    const ids = selected;
+    commit((memos ?? []).filter((m) => !ids.has(m.id)));
+    exitSelect();
   };
 
   const del = (m: Memo) => {
@@ -1600,15 +1830,16 @@ export function MemoView({ onBack }: { onBack: () => void }) {
     if (editing === m.id) {
       setEditing(null);
       setDraft('');
+      setRemindAt(null);
     }
   };
 
   return (
     <>
       <div class="subhead">
-        <button onClick={onBack}>‹ 返回</button>
-        <strong>备忘录</strong>
-        <span class="memo-count">{memos?.length ?? 0} 条</span>
+        <button onClick={selecting ? exitSelect : onBack}>‹ {selecting ? '取消' : '返回'}</button>
+        <strong>{selecting ? `已选 ${selected.size} 条` : '备忘录'}</strong>
+        {!selecting && <span class="memo-count">{memos?.length ?? 0} 条</span>}
       </div>
       <main class="tabbody memo-page">
         <section class="card memo-new">
@@ -1622,12 +1853,22 @@ export function MemoView({ onBack }: { onBack: () => void }) {
           />
           <div class="memo-acts">
             <span>{draft.length}/1000</span>
+            <button
+              type="button"
+              class={`memo-bell${remindAt ? ' on' : ''}`}
+              aria-label="设置提醒"
+              onClick={() => setPicker(true)}
+            >
+              <BellGlyph size={15} />
+              {remindAt ? <em>{memoRemindText(remindAt)}</em> : <em>提醒</em>}
+            </button>
             {editing && (
               <button
                 class="ghost"
                 onClick={() => {
                   setEditing(null);
                   setDraft('');
+                  setRemindAt(null);
                 }}
               >
                 取消
@@ -1644,13 +1885,58 @@ export function MemoView({ onBack }: { onBack: () => void }) {
           <p class="empty-line">还没有记录，上面写一条试试。</p>
         ) : null}
         {memos && memos.length > 0 ? (
-          <section class="card memo-list">
+          <section class={`card memo-list${selecting ? ' selecting' : ''}`}>
             {memos.map((m) => (
-              <div class={`memo-item${editing === m.id ? ' on' : ''}`} key={m.id}>
+              <div
+                class={`memo-item${editing === m.id ? ' on' : ''}${selected.has(m.id) ? ' sel' : ''}`}
+                key={m.id}
+                onPointerDown={(e) => {
+                  if (selecting) return;
+                  press.current = {
+                    id: m.id,
+                    x: e.clientX,
+                    y: e.clientY,
+                    timer: window.setTimeout(() => {
+                      enterSelect(m.id);
+                      press.current = null;
+                    }, 480),
+                  };
+                }}
+                onPointerMove={(e) => {
+                  if (!press.current) return;
+                  if (Math.abs(e.clientX - press.current.x) > 10 || Math.abs(e.clientY - press.current.y) > 10) {
+                    window.clearTimeout(press.current.timer);
+                    press.current = null;
+                  }
+                }}
+                onPointerUp={() => {
+                  if (!press.current) return;
+                  window.clearTimeout(press.current.timer);
+                  press.current = null;
+                }}
+                onPointerCancel={() => {
+                  if (!press.current) return;
+                  window.clearTimeout(press.current.timer);
+                  press.current = null;
+                }}
+                onClick={() => {
+                  if (suppressClick.current) {
+                    suppressClick.current = false;
+                    return;
+                  }
+                  if (selecting) toggleOne(m.id);
+                }}
+              >
                 <p class="memo-text">{m.text}</p>
                 <div class="memo-meta">
-                  <span>{memoTime(m.updatedAt)}</span>
-                  {confirmId === m.id ? (
+                  {m.remindAt ? (
+                    <span class="memo-remind">
+                      <BellGlyph size={12} />
+                      {memoRemindText(m.remindAt)}
+                    </span>
+                  ) : null}
+                  <span class="memo-time">{memoTime(m.updatedAt)}</span>
+                  {selecting ? null : confirmId === m.id ? (
                     <>
                       <button type="button" class="ghost danger" onClick={() => del(m)}>
                         确认删除
@@ -1670,11 +1956,44 @@ export function MemoView({ onBack }: { onBack: () => void }) {
                     </>
                   )}
                 </div>
+                {selecting && (
+                  <span class={`memo-check${selected.has(m.id) ? ' on' : ''}`} aria-hidden="true">
+                    {selected.has(m.id) ? (
+                      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="m5 12.5 4.5 4.5L19 7.5" />
+                      </svg>
+                    ) : null}
+                  </span>
+                )}
               </div>
             ))}
           </section>
         ) : null}
       </main>
+      {selecting && (
+        <div class="memo-bulk">
+          <button type="button" class="bulk-all" onClick={toggleAll}>
+            {allSelected ? '取消全选' : '全选'}
+          </button>
+          <span class="bulk-count">已选 {selected.size} 条</span>
+          <button type="button" class={`bulk-del${confirmBulk ? ' confirm' : ''}`} onClick={deleteSelected}>
+            <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M4.5 7h15M9 7V4.8h6V7M7 7l.8 12.2h8.4L17 7M10 10.5v6M14 10.5v6" />
+            </svg>
+            {confirmBulk ? `确认删除 ${selected.size} 条` : '删除'}
+          </button>
+        </div>
+      )}
+      {picker && (
+        <MemoPicker
+          value={remindAt}
+          onClose={() => setPicker(false)}
+          onConfirm={(ts) => {
+            setRemindAt(ts);
+            setPicker(false);
+          }}
+        />
+      )}
     </>
   );
 }
