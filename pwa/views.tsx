@@ -1556,6 +1556,8 @@ export function MemoView({ onBack }: { onBack: () => void }) {
   const [memos, setMemos] = useState<Memo[] | null>(null);
   const [draft, setDraft] = useState('');
   const [editing, setEditing] = useState<string | null>(null);
+  /* 删除不用 window.confirm：WebView 里它可能直接返回 false，改成点两下确认 */
+  const [confirmId, setConfirmId] = useState<string | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -1586,14 +1588,15 @@ export function MemoView({ onBack }: { onBack: () => void }) {
   };
 
   const startEdit = (m: Memo) => {
+    setConfirmId(null);
     setEditing(m.id);
     setDraft(m.text);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const del = (m: Memo) => {
-    if (!window.confirm('删除这条备忘？')) return;
     commit(removeMemo(memos ?? [], m.id));
+    setConfirmId(null);
     if (editing === m.id) {
       setEditing(null);
       setDraft('');
@@ -1647,12 +1650,25 @@ export function MemoView({ onBack }: { onBack: () => void }) {
                 <p class="memo-text">{m.text}</p>
                 <div class="memo-meta">
                   <span>{memoTime(m.updatedAt)}</span>
-                  <button type="button" class="ghost" onClick={() => startEdit(m)}>
-                    编辑
-                  </button>
-                  <button type="button" class="ghost danger" onClick={() => del(m)}>
-                    删除
-                  </button>
+                  {confirmId === m.id ? (
+                    <>
+                      <button type="button" class="ghost danger" onClick={() => del(m)}>
+                        确认删除
+                      </button>
+                      <button type="button" class="ghost" onClick={() => setConfirmId(null)}>
+                        取消
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <button type="button" class="ghost" onClick={() => startEdit(m)}>
+                        编辑
+                      </button>
+                      <button type="button" class="ghost danger" onClick={() => setConfirmId(m.id)}>
+                        删除
+                      </button>
+                    </>
+                  )}
                 </div>
               </div>
             ))}
