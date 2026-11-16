@@ -712,8 +712,10 @@ function HomeBars(props: {
               <span class="bar-ic">
                 <BarGlyph name="card" />
               </span>
-              <span class="bar-t">{bar.label}</span>
-              <span class="bar-s">{props.cardBusy ? '正在查余额…' : props.cardText || '点一下查余额'}</span>
+              <span class="bar-txt">
+                <span class="bar-t">{bar.label}</span>
+                <span class="bar-s">{props.cardBusy ? '正在查余额…' : props.cardText || '点一下查余额'}</span>
+              </span>
             </button>
           ) : (
             <button
@@ -723,30 +725,39 @@ function HomeBars(props: {
               onClick={() => props.onPick(bar.text)}
               title={bar.text === bar.label ? undefined : bar.text}
             >
-              <span class="bar-ic">
-                <BarGlyph name={barGlyphOf(bar)} />
+              {/* 空教室不要 logo，直接文字起头 */}
+              {barGlyphOf(bar) === 'room' ? null : (
+                <span class="bar-ic">
+                  <BarGlyph name={barGlyphOf(bar)} />
+                </span>
+              )}
+              <span class="bar-txt">
+                <span class="bar-t">{bar.label}</span>
+                <span class="bar-s">{bar.text}</span>
               </span>
-              <span class="bar-t">{bar.label}</span>
-              <span class="bar-s">{bar.text}</span>
             </button>
           ),
         )}
-        {/* 天气固定占第四格，和图书馆 / 空教室 / 校园卡拼成 2x2 */}
+        {/* 天气也排成一条，和上面几栏一个样式 */}
         <button type="button" class="bar" onClick={props.onWeather}>
           <span class="bar-ic">
             <BarGlyph name="wx" />
           </span>
-          <span class="bar-t">天气</span>
-          <span class="bar-s">{wxLine}</span>
+          <span class="bar-txt">
+            <span class="bar-t">天气</span>
+            <span class="bar-s">{wxLine}</span>
+          </span>
         </button>
-        {/* 作业横着占满一行：截止时间比数字重要，一行足够放「3 份待交 · 最近 11-16」 */}
+        {/* 作业也排成一条，红点表示有逾期 */}
         <button type="button" class={`bar bar-tile-hw${props.hwDot ? ' alert' : ''}`} onClick={props.onHomework}>
           {props.hwDot ? <span class="bar-dot" /> : null}
           <span class="bar-ic">
             <BarGlyph name="hw" />
           </span>
-          <span class="bar-t">作业</span>
-          <span class="bar-s">{props.hwText}</span>
+          <span class="bar-txt">
+            <span class="bar-t">作业</span>
+            <span class="bar-s">{props.hwText}</span>
+          </span>
         </button>
       </div>
       {customBars.map((bar) => (
@@ -757,8 +768,10 @@ function HomeBars(props: {
           onClick={() => props.onPick(bar.text)}
           title={bar.text === bar.label ? undefined : bar.text}
         >
-          <span class="bar-t">{bar.label}</span>
-          <span class="bar-s">{bar.text}</span>
+          <span class="bar-txt">
+            <span class="bar-t">{bar.label}</span>
+            <span class="bar-s">{bar.text}</span>
+          </span>
         </button>
       ))}
       {props.bars.length === 0 ? (
