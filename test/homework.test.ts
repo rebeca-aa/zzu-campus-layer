@@ -283,3 +283,67 @@ describe('存取', () => {
     expect(settings.remind.sameDayHour).toBe(8);
   });
 });
+
+describe('识别更宽的写法（2026-11 加）', () => {
+  it('认「20 号」「明晚八点」「这周内」', () => {
+    expect(parseDueAt('11月20号晚上8点前', NOW)).toBe(new Date(2026, 10, 20, 20, 0).getTime());
+    expect(parseDueAt('20号交', NOW)).toBe(new Date(2026, 10, 20, 23, 59).getTime());
+    expect(parseDueAt('明晚八点', NOW)).toBe(new Date(2026, 10, 14, 20, 0).getTime());
+    expect(parseDueAt('明天中午一点前', NOW)).toBe(new Date(2026, 10, 14, 13, 0).getTime());
+    expect(parseDueAt('这周内交', NOW)).toBe(new Date(2026, 10, 15, 23, 59).getTime());
+  });
+
+  it('编号清单 + 末尾统一写截止时间', () => {
+    const text = ['第 12 周作业：', '1. 高数：习题册 3.1–3.4', '2. 大物实验报告', '3. 英语作文二', '周五前交'].join('\n');
+    const drafts = parseHomework(text, NOW);
+    expect(drafts).toHaveLength(3);
+    for (const d of drafts) expect(d.dueAt).toBe(new Date(2026, 10, 13, 23, 59).getTime());
+    expect(drafts.map((d) => d.title).join('|')).toContain('大物实验报告');
+    /* 标题行和「周五前交」都不该变成作业 */
+    expect(drafts.some((d) => d.title.includes('第 12 周'))).toBe(false);
+    expect(drafts.some((d) => d.title.trim() === '周五前交')).toBe(false);
+  });
+
+  it('猜得出课程，并且标题里不重复「高数作业：」', () => {
+    const drafts = parseHomework('高数作业：习题册 3.1–3.4 周五前交', NOW);
+    expect(drafts).toHaveLength(1);
+    expect(drafts[0]!.course).toBe('高数');
+    expect(drafts[0]!.title).not.toContain('高数作业');
+    expect(drafts[0]!.title).toContain('习题册');
+  });
+
+  it('《大学物理》这种写法也认课程', () => {
+    const drafts = parseHomework('《大学物理》实验报告 下周三之前交', NOW);
+    expect(drafts[0]!.course).toBe('大学物理');
+    /* 今天是 11-13 周五，「下周三」= 11-25 */
+    expect(drafts[0]!.dueAt).toBe(new Date(2026, 10, 25, 23, 59).getTime());
+  });
+});
+describe('标题里不留交作业的时间（2026-11 加）', () => {
+  it('三条常见写法：时间从标题里剥掉，课程和备注留下', () => {
+    const text = [
+      '高数作业：习题册 3.1–3.4 周五前交，纸质交到学委那儿',
+      '大物实验报告 下周三之前交',
+      '英语作文二 记得传雨课堂，周日晚上12点前',
+    ].join('\n');
+    const drafts = parseHomework(text, NOW);
+    expect(drafts).toHaveLength(3);
+    const [a, b, c] = drafts;
+    expect(a!.title).toBe('习题册 3.1–3.4，纸质交到学委那儿');
+    expect(a!.course).toBe('高数');
+    expect(a!.note).toBe('交纸质');
+    expect(a!.dueAt).toBe(new Date(2026, 10, 13, 23, 59).getTime());
+    expect(b!.title).toBe('大物实验报告');
+    expect(b!.course).toBe('大物');
+    expect(b!.dueAt).toBe(new Date(2026, 10, 25, 23, 59).getTime());
+    expect(c!.title).toBe('英语作文二 记得传雨课堂');
+    expect(c!.course).toBe('英语');
+    expect(c!.note).toBe('线上提交');
+    expect(c!.dueAt).toBe(new Date(2026, 10, 15, 23, 59).getTime());
+  });
+
+  it('标题里本来就没有时间的，不会被削', () => {
+    const drafts = parseHomework('第三章习题 明天交', NOW);
+    expect(drafts[0]!.title).toBe('第三章习题');
+  });
+});

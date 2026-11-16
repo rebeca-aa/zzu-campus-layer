@@ -9,13 +9,13 @@ import {
   dueText,
   homeworkState,
   homeworkStats,
-  parseHomework,
   remainText,
   type HomeworkDraft,
   type HomeworkItem,
   type HomeworkRemind,
   type HomeworkSettings,
 } from '../src/core/homework';
+import { parseHomeworkSmart } from '../src/core/hwParse';
 import {
   DEFAULT_HOME_BAR_FIXED,
   MAX_HOME_BARS,
@@ -2096,6 +2096,9 @@ export function HomeworkView(props: HomeworkViewProps) {
   const now = Date.now();
   const [paste, setPaste] = useState('');
   const [drafts, setDrafts] = useState<HomeworkDraft[] | null>(null);
+  /** 识别用的是模型还是规则、为什么退化——直接显示在草稿上方 */
+  const [parseNote, setParseNote] = useState('');
+  const [busy, setBusy] = useState(false);
   const [manual, setManual] = useState({ title: '', course: '', due: '' });
   const [manualOpen, setManualOpen] = useState(false);
   const [code, setCode] = useState('');
@@ -2107,15 +2110,26 @@ export function HomeworkView(props: HomeworkViewProps) {
   const done = useMemo(() => props.items.filter((x) => x.doneAt).reverse(), [props.items]);
   const remind = props.settings.remind;
 
-  const doParse = () => {
-    const list = parseHomework(paste, Date.now());
-    if (!list.length) return;
-    setDrafts(list);
+  const doParse = async () => {
+    if (!paste.trim() || busy) return;
+    setBusy(true);
+    setParseNote('');
+    try {
+      /* 有模型就用模型读（准确得多），没有就退回规则；两种情况都会给一条说明 */
+      const out = await parseHomeworkSmart(paste, { now: Date.now() });
+      setDrafts(out.drafts.length ? out.drafts : null);
+      setParseNote(out.drafts.length ? out.note ?? '' : '这段里没认出作业：可以手动填一条');
+    } catch (err) {
+      setParseNote(`识别失败：${(err as Error)?.message ?? err}`);
+    } finally {
+      setBusy(false);
+    }
   };
 
   const addDrafts = (list: HomeworkDraft[]) => {
     props.onAdd(list);
     setDrafts(null);
+    setParseNote('');
     setPaste('');
   };
 
@@ -2189,13 +2203,14 @@ export function HomeworkView(props: HomeworkViewProps) {
           onInput={(e) => setPaste((e.currentTarget as HTMLTextAreaElement).value)}
         />
         <div class="hw-acts-row">
-          <button class="primary" disabled={!paste.trim()} onClick={doParse}>
-            识别
+          <button class="primary" disabled={!paste.trim() || busy} onClick={() => void doParse()}>
+            {busy ? '识别中…' : '识别'}
           </button>
           <button class="ghost" onClick={() => setManualOpen((v) => !v)}>
             {manualOpen ? '收起手填' : '手动填'}
           </button>
         </div>
+        <p class="hw-src">配了模型就让模型读（拆条、挑课程、算截止都准），没配才走规则。</p>
 
         {manualOpen && (
           <div class="hw-manual">
@@ -2245,6 +2260,7 @@ export function HomeworkView(props: HomeworkViewProps) {
               <strong>识别到 {drafts.length} 条</strong>
               <span>不对就改，或先删掉不要的</span>
             </div>
+            {parseNote && <p class="hw-src">{parseNote}</p>}
             {drafts.map((d, i) => (
               <div class="hw-draft" key={`${d.title}-${i}`}>
                 <input
@@ -2287,7 +2303,7 @@ export function HomeworkView(props: HomeworkViewProps) {
               <button class="primary" onClick={() => addDrafts(drafts)}>
                 全加进清单
               </button>
-              <button class="ghost" onClick={() => setDrafts(null)}>
+              <button class="ghost" onClick={() => { setDrafts(null); setParseNote(''); }}>
                 不要了
               </button>
             </div>

@@ -351,6 +351,26 @@ export function dueText(dueAt: number, now = Date.now()): string {
 // ── 解析 ─────────────────────────────────────────────────────────────
 
 const CN_NUM: Record<string, number> = { 一: 1, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6, 日: 7, 天: 7 };
+const CN_DIGIT: Record<string, number> = {
+  零: 0, 一: 1, 二: 2, 两: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9, 十: 10,
+};
+
+/** 「八」「十二」「二十三」→ 数字；不是中文数字返回 NaN（「晚上八点」这种太常见了） */
+export function cnNumber(raw: string): number {
+  const s = raw.trim();
+  if (!s) return Number.NaN;
+  if (/^\d{1,3}$/.test(s)) return Number(s);
+  if (s.includes('十')) {
+    const [head, tail] = s.split('十');
+    const tens = head ? CN_DIGIT[head] ?? Number.NaN : 1;
+    const ones = tail ? CN_DIGIT[tail] ?? Number.NaN : 0;
+    if (!Number.isFinite(tens) || !Number.isFinite(ones)) return Number.NaN;
+    return tens * 10 + ones;
+  }
+  const chars = [...s];
+  if (chars.length === 1) return CN_DIGIT[chars[0]!] ?? Number.NaN;
+  return Number.NaN;
+}
 
 function weekdayIndex(text: string): number | null {
   const m = /(?:周|星期)([一二三四五六日天])/.exec(text);
@@ -361,24 +381,37 @@ function weekdayIndex(text: string): number | null {
   return num === 7 ? 0 : num;
 }
 
+/** 某天所在那一周的周日 */
+function endOfWeek(base: Date, weeksAhead = 0): Date {
+  const d = new Date(base.getTime() + weeksAhead * 7 * DAY);
+  d.setDate(d.getDate() + ((7 - d.getDay()) % 7));
+  return d;
+}
+
 /** 从一段话里猜截止时间；猜不到返回 null（绝不瞎猜） */
 export function parseDueAt(text: string, now = Date.now()): number | null {
   const src = text.replace(/\s+/g, ' ');
-  const timeMatch = /(\d{1,2})\s*[:：点时]\s*(\d{1,2})?/.exec(src);
+  const timeMatch = /(\d{1,2}|[零一二两三四五六七八九十]{1,3})\s*[:：点时]\s*(\d{1,2}|[零一二两三四五六七八九十]{1,2})?\s*(半|一刻|三刻)?/.exec(src);
   let hour = 23;
   let minute = 59;
   if (timeMatch) {
-    const h = Number(timeMatch[1]);
+    const h = cnNumber(timeMatch[1]!);
     if (Number.isFinite(h) && h >= 0 && h <= 23) {
       hour = h;
-      minute = timeMatch[2] ? Math.min(59, Number(timeMatch[2])) : 0;
+      const mm = timeMatch[2] ? cnNumber(timeMatch[2]) : 0;
+      minute = Number.isFinite(mm) ? Math.min(59, mm) : 0;
+      if (timeMatch[3] === '半') minute = 30;
+      else if (timeMatch[3] === '一刻') minute = 15;
+      else if (timeMatch[3] === '三刻') minute = 45;
     }
-    if (/下午|晚上|晚间/.test(src) && hour < 12) hour += 12;
+    if (/下午|晚上|晚间|傍晚|夜|晚/.test(src) && hour < 12) hour += 12;
     /* 「周日晚 12 点」是这一天的最后一刻，不是中午 12 点 */
     if (/晚|夜|凌晨/.test(src) && hour === 12) {
       hour = 23;
       minute = 59;
     }
+    /* 「中午 1 点」是 13 点 */
+    if (/中午/.test(src) && hour >= 1 && hour < 11) hour += 12;
   }
 
   const base = new Date(now);
@@ -387,7 +420,7 @@ export function parseDueAt(text: string, now = Date.now()): number | null {
     return d.getTime();
   };
 
-  // 1) 绝对日期：11-16 / 11月16日 / 11/16
+  // 1) 绝对日期：11-16 / 11月16日 / 11/16 / 11月16号
   //    注意别把「习题册 3.1–3.4」里的 1-3 当成日期
   const absRe = /(\d{1,2})\s*[-月/]\s*(\d{1,2})/g;
   for (let abs = absRe.exec(src); abs; abs = absRe.exec(src)) {
@@ -407,9 +440,29 @@ export function parseDueAt(text: string, now = Date.now()): number | null {
     return ts;
   }
 
-  // 2) 相对日：今天/明天/后天
-  if (/今天|今晚/.test(src)) return setAt(base);
-  if (/明天|明晚/.test(src)) {
+  // 1.5) 只说「20 号」「3 日」：按本月算
+  const dayOnly = /(?:^|[^\d.第])(\d{1,2}|[一二三四五六七八九十]{1,2})\s*[日号](?![楼层线])/.exec(src);
+  if (dayOnly) {
+    const day = cnNumber(dayOnly[1]!);
+    if (Number.isFinite(day) && day >= 1 && day <= 31) {
+      const d = new Date(base);
+      d.setDate(day);
+      let ts = setAt(d);
+      if (ts < now - 20 * DAY) {
+        d.setMonth(d.getMonth() + 1, day);
+        ts = setAt(d);
+      }
+      return ts;
+    }
+  }
+
+  // 2) 相对日：今天/明天/后天/大后天
+  if (/今天|今晚|今儿/.test(src)) return setAt(base);
+  if (/大后天/.test(src)) {
+    const d = new Date(now + 3 * DAY);
+    return setAt(d);
+  }
+  if (/明天|明晚|明儿/.test(src)) {
     const d = new Date(now + DAY);
     return setAt(d);
   }
@@ -425,27 +478,125 @@ export function parseDueAt(text: string, now = Date.now()): number | null {
     let delta = (wd - todayWd + 7) % 7;
     /* 「周五前交」这种话，今天正好周五就算今天 */
     if (delta === 0 && !/前|截|之前/.test(src)) delta = 7;
-    if (/下周/.test(src)) delta += 7;
+    if (/下下周/.test(src)) delta += 14;
+    else if (/下周/.test(src)) delta += 7;
     const d = new Date(now + delta * DAY);
     return setAt(d);
+  }
+
+  // 4) 只说「这周内 / 本周之内」：按本周日算
+  if (/这周|本周|这星期|本星期/.test(src)) {
+    return setAt(endOfWeek(base));
   }
 
   return null;
 }
 
-/** 去掉「@所有人」「作业：」这类噪音，留下能当标题的一句 */
+/** 课程名的常见噪音：这些词后面跟「作业」不代表是门课 */
+const COURSE_NOISE = new Set([
+  '这周', '本周', '下周', '上周', '今天', '明天', '后天', '今晚', '明晚', '全体', '所有', '大家', '同学们', '同学', '各科', '这次', '下次', '各位', '最后的', '这学期', '期中', '期末',
+  '作业', '通知', '提醒', '注意', '重要', '紧急',
+]);
+
+/** 从一句话里猜课程名；猜不到返回 undefined（宁可空着） */
+export function guessCourse(sentence: string): string | undefined {
+  const s = sentence
+    .replace(/@所有人|@全体成员/g, ' ')
+    .replace(/^\s*\d{1,2}\s*[.、)．]\s*/, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  /* 《大学物理》作业 */
+  const book = /《\s*([^》]{2,12})\s*》/.exec(s);
+  if (book) {
+    const name = oneLine(book[1]!);
+    if (name && !COURSE_NOISE.has(name)) return name.slice(0, 20);
+  }
+  /* 高数作业 / 大学物理实验报告 / 数据结构 作业 / 英语课作业 */
+  const m = /^([^\s，,。:：、；;！!]{2,10}?)\s*(?:课)?\s*(?:作业本|作业|实验报告|报告|小论文|论文|作文|习题)/.exec(s);
+  if (m) {
+    const name = m[1]!.replace(/^[\s\d.、)．]+/, '');
+    if (name && name.length >= 2 && !COURSE_NOISE.has(name) && !/^\d+$/.test(name)) return name.slice(0, 20);
+  }
+  /* 高数：周五交作业 —— 冒号前面像课程名的 */
+  const colon = /^([^\s，,。:：、；;]{2,8})\s*[:：]/.exec(s);
+  if (colon) {
+    const name = colon[1]!;
+    /* 「周五：」「作业：」这种不是课程名 */
+    if (!COURSE_NOISE.has(name) && !/^[周星期]/.test(name) && /[\u4e00-\u9fa5]/.test(name)) return name.slice(0, 20);
+  }
+  return undefined;
+}
+
+/** 标题里夹着的交作业时间：「周五前交」「下周三之前交」「周日晚上12点前」——标题里不需要它 */
+const DUE_PHRASE =
+  /(?:^|[\s，,、；;])(?:(?:周|星期)[一二三四五六日天]|下周[一二三四五六日天]?|下下周[一二三四五六日天]?|今天|明天|后天|大后天|今晚|明晚|这周|本周|\d{1,2}\s*月\s*\d{1,2}\s*[日号]?|\d{1,2}\s*[日号])\s*(?:中午|晚上|上午|下午|早晨|凌晨|夜里)?\s*\d{0,2}\s*[:：点时]?\s*(?:半|一刻|三刻|\d{0,2}\s*分)?\s*(?:之前|以前|为止|截止|截至|前)?\s*(?:交|提交)?(?=[\s，,、；;。！!]|$)/g;
+
+function stripDuePhrases(s: string): string {
+  return s
+    .replace(DUE_PHRASE, ' ')
+    .replace(/\s+([，,、；;。])/g, '$1')
+    .replace(/\s+/g, ' ')
+    .replace(/^[\s，,、；;:：]+|[\s，,、；;:：]+$/g, '')
+    .replace(/([，,、；;])\s*(?=[，,、；;])/g, '')
+    .trim();
+}
+
+/** 去掉「@所有人」「作业：」「1.」这类噪音，留下能当标题的一句 */
 function cleanTitle(raw: string): string {
   let s = raw.replace(/@所有人|@全体成员/g, ' ');
+  s = s.replace(/^\s*\d{1,2}\s*[.、)．]\s*/, '');
   s = s.replace(/^[\s:：,，。\-]+/, '');
   s = s.replace(/^(作业|通知|提醒)\s*[:：]\s*/, '');
   const first = s.split(/[。！!\n]/)[0] ?? '';
-  return oneLine(first).slice(0, 80);
+  return stripDuePhrases(oneLine(first)).slice(0, 80);
+}
+
+/** 「周五前交」「明天截止」这类只写时间的句子：它只负责交代时间，自己不该变成一条作业 */
+const DATE_WORDS =
+  /(?:周|星期)[一二三四五六日天]|今天|明天|后天|大后天|今晚|明晚|这周|本周|下周|截止|截至|之前|以前|前|交|记得|务必|请|于|号|日|\d{1,2}\s*[:：点时]\s*\d{0,2}|[零一二两三四五六七八九十]{1,3}\s*[点时]/g;
+
+function isDateOnly(sentence: string): boolean {
+  const rest = sentence.replace(DATE_WORDS, '').replace(/[\s，,。:：、；;！!（）()【】[\]<>《》"']/g, '');
+  return rest.length < 2;
+}
+
+/** 「第 12 周作业：」「本周任务：」这种是标题行，不是一条作业 */
+function looksLikeHeader(sentence: string): boolean {
+  const t = oneLine(sentence).replace(/[:：]$/, '');
+  if (/^第\s*[\d一二三四五六七八九十]+\s*周/.test(t) && /作业|任务|通知|安排/.test(t)) return true;
+  return /^(?:本周|这周|下周|本周|这个星期|这星期)(?:的)?\s*(?:作业|任务|安排|通知)/.test(t);
+}
+
+/** 截到清单里的一条：标题 + 课程 + 交法备注 */
+function pushDraft(out: HomeworkDraft[], sentence: string, dueAt: number, seen: Set<string>): void {
+  const raw = cleanTitle(sentence);
+  if (!raw) return;
+  const course = guessCourse(sentence);
+  /* 课程名已经单列了，标题里就别再重复「高数作业：」这一段；
+     只剥「课程 + 作业/报告 + 冒号」这种明确的前缀——「英语作文二」里的「作文」是作业名本身，不能剥 */
+  let title = raw;
+  if (course) {
+    const re = course.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const head = new RegExp(`^${re}\\s*(?:课)?\\s*(?:作业本|作业|实验报告|报告)\\s*[:：,，]?\\s*`);
+    const stripped = raw.replace(head, '').trim();
+    if (stripped.length >= 2 && stripped !== raw) title = stripped;
+  }
+  title = title.slice(0, 80);
+  const key = title.replace(/\s+/g, '');
+  if (!title || seen.has(key)) return;
+  seen.add(key);
+  const note = /纸质|打印|手写|交到/.test(sentence) ? '交纸质' : /雨课堂|学习通|超星/.test(sentence) ? '线上提交' : undefined;
+  out.push({ title, ...(course ? { course } : {}), dueAt, ...(note ? { note } : {}), source: 'paste' });
 }
 
 /**
  * 从一段群消息里解析出一条（或几条）作业。
- * 规则：先按「句号/换行」切句，找带日期或周几的句子当一条；
- * 课程名只在明显写了「xx课/xx作业」时猜，猜不到就留空——宁可漏。
+ * 规则：
+ *  1. 先按换行 / 句号 / 「1. 2.」编号切块；
+ *  2. 块里带日期或周几的，就当一条作业的开始；
+ *  3. 没带日期的块先攒着，等下一条带日期的块把它一起收掉
+ *     （群里爱写「作业：/高数习题 3.1/大物报告/周五交」这种一行一条的清单）；
+ *  4. 课程名只在明显写了「xx作业」「《xx》」时猜，猜不到留空——宁可漏。
  */
 export function parseHomework(text: string, now = Date.now()): HomeworkDraft[] {
   const body = text.replace(/\r/g, '');
@@ -453,17 +604,25 @@ export function parseHomework(text: string, now = Date.now()): HomeworkDraft[] {
   const chunks = body
     .split(/\n+/)
     .flatMap((line) => line.split(/(?<=[。！!])/))
+    /* 「1. … 2. …」这种一行清单：切在编号前；(?!\d) 是为了别把「习题册 3.1–3.4」切成两半 */
+    .flatMap((s) => s.split(/\s+(?=\d{1,2}\s*[.、)．](?!\d)\s*\S)/))
     .map((s) => s.trim())
     .filter(Boolean);
 
   const out: HomeworkDraft[] = [];
+  const seen = new Set<string>();
+  let pending: string[] = [];
   for (const sentence of chunks) {
     const dueAt = parseDueAt(sentence, now);
-    if (!dueAt) continue;
-    const title = cleanTitle(sentence);
-    if (!title) continue;
-    const note = /纸质|打印|手写/.test(sentence) ? '交纸质' : /雨课堂|学习通|超星/.test(sentence) ? '线上提交' : undefined;
-    out.push({ title, dueAt, ...(note ? { note } : {}), source: 'paste' });
+    if (dueAt === null) {
+      if (cleanTitle(sentence) && !looksLikeHeader(sentence)) pending.push(sentence);
+      continue;
+    }
+    /* 收掉前面攒下的、没写时间的行：它们跟着这条的时间走 */
+    for (const p of pending) pushDraft(out, p, dueAt, seen);
+    pending = [];
+    /* 「周五前交」这种只交代时间的句子本身不算一条作业 */
+    if (!isDateOnly(sentence)) pushDraft(out, sentence, dueAt, seen);
     if (out.length >= 6) break;
   }
   // 一句都没解析出来时，退化成「整段当标题 + 默认明天 23:59」，让用户自己改时间

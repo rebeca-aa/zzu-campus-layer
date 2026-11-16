@@ -2503,6 +2503,13 @@ html[data-theme='pink'] .grid .course .tag {
   resize: vertical;
 }
 .hw-paste::placeholder { color: var(--dim); }
+/* 「模型识别 / 规则识别」这条来源说明 */
+.hw-src {
+  margin: 7px 0 0;
+  color: var(--dim);
+  font-size: 11.5px;
+  line-height: 1.5;
+}
 .hw-acts-row {
   display: flex;
   flex-wrap: wrap;
