@@ -9,6 +9,7 @@
 import type { CampusSession } from './services';
 import { tokenMeta } from './jwt';
 import { getKV, encodeBundle, type BundleTheme, type TokenBundle } from './kv';
+import { readSecure, writeSecure } from './secure';
 import { setTokenSwap } from './http';
 import { CUSTOM_KEY, normalizeCustom, parseThemeKey } from './theme';
 
@@ -28,11 +29,11 @@ const KEY = 'tokens';
 const THEME_KEY = 'theme';
 
 async function readStore(): Promise<StoreMap> {
-  return (await getKV().get<StoreMap>(KEY)) ?? {};
+  return (await readSecure<StoreMap>(KEY)) ?? {};
 }
 
 async function writeStore(next: StoreMap): Promise<void> {
-  await getKV().set(KEY, next);
+  await writeSecure(KEY, next);
 }
 
 export async function saveToken(source: TokenSource, token: string): Promise<void> {
@@ -122,11 +123,11 @@ export interface ChatSession {
 }
 
 export async function saveChatSession(token: string): Promise<void> {
-  await getKV().set(CHAT_KEY, { token, savedAt: Date.now() } satisfies ChatSession);
+  await writeSecure(CHAT_KEY, { token, savedAt: Date.now() } satisfies ChatSession);
 }
 
 export async function getChatSession(): Promise<ChatSession | null> {
-  return (await getKV().get<ChatSession>(CHAT_KEY)) ?? null;
+  return (await readSecure<ChatSession>(CHAT_KEY)) ?? null;
 }
 
 // ---- 模型设置（学校 Open WebUI 的 API Key / 模型名） ----
@@ -149,13 +150,13 @@ const DEFAULT_SETTINGS: LlmSettingsStored = {
 };
 
 export async function getLlmSettings(): Promise<LlmSettingsStored> {
-  const stored = (await getKV().get<Partial<LlmSettingsStored>>(SETTINGS_KEY)) ?? {};
+  const stored = (await readSecure<Partial<LlmSettingsStored>>(SETTINGS_KEY)) ?? {};
   return { ...DEFAULT_SETTINGS, ...stored };
 }
 
 export async function setLlmSettings(patch: Partial<LlmSettingsStored>): Promise<LlmSettingsStored> {
   const next = { ...(await getLlmSettings()), ...patch };
-  await getKV().set(SETTINGS_KEY, next);
+  await writeSecure(SETTINGS_KEY, next);
   return next;
 }
 

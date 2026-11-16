@@ -6,9 +6,12 @@
  *
  * `deviceId` 是学校认设备用的：第一次过完短信 MFA，这台设备就被登记成可信设备，
  * 之后同一个 deviceId 再换票就不需要验证码了。所以它必须稳定，生成一次就存下来。
+ *
+ * 密码落盘前过 `secure.ts` 的 AES-GCM：存储里只剩密文，钥匙在本机密钥库。
  */
 import type { AppCreds } from './appMint';
 import { getKV } from './kv';
+import { readSecure, writeSecure } from './secure';
 
 const KEY = 'appCreds';
 
@@ -28,7 +31,7 @@ export function newDeviceId(): string {
 }
 
 export async function getAppCreds(): Promise<StoredAppCreds | null> {
-  const got = await getKV().get<StoredAppCreds>(KEY);
+  const got = await readSecure<StoredAppCreds>(KEY);
   if (!got || typeof got.account !== 'string' || typeof got.password !== 'string') return null;
   if (!got.account || !got.password) return null;
   return {
@@ -55,7 +58,7 @@ export async function saveAppCreds(input: Partial<AppCreds>): Promise<StoredAppC
     savedAt: Date.now(),
     ...(trustedAt ? { trustedAt } : {}),
   };
-  await getKV().set(KEY, next);
+  await writeSecure(KEY, next);
   return next;
 }
 
@@ -64,7 +67,7 @@ export async function markCredsTrusted(at = Date.now()): Promise<StoredAppCreds 
   const prev = await getAppCreds();
   if (!prev) return null;
   const next: StoredAppCreds = { ...prev, trustedAt: at };
-  await getKV().set(KEY, next);
+  await writeSecure(KEY, next);
   return next;
 }
 

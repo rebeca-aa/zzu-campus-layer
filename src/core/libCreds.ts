@@ -5,9 +5,10 @@
  * 签不出图书馆要的 CAS ticket，所以这里单独存一份密码，等要用的那一刻
  * （扩展里打开图书馆页 / 壳里点「登录图书馆」）再拿它去登一次。
  *
- * 存在本机，不进同步码，也不上传。
+ * 存在本机，不进同步码，也不上传。落盘前过 `secure.ts` 的 AES-GCM（只有密文）。
  */
 import { getKV } from './kv';
+import { readSecure, writeSecure } from './secure';
 
 const KEY = 'libCreds';
 
@@ -29,7 +30,7 @@ function norm(raw: unknown): LibCreds | null {
 
 export async function getLibCreds(): Promise<LibCreds | null> {
   try {
-    return norm(await getKV().get<unknown>(KEY));
+    return norm(await readSecure<unknown>(KEY));
   } catch {
     return null;
   }
@@ -38,7 +39,7 @@ export async function getLibCreds(): Promise<LibCreds | null> {
 export async function saveLibCreds(creds: LibCreds): Promise<LibCreds> {
   const clean = norm(creds);
   if (!clean) throw new Error('学号和图书馆密码都要填');
-  await getKV().set(KEY, clean);
+  await writeSecure(KEY, clean);
   return clean;
 }
 
@@ -46,7 +47,7 @@ export async function saveLibCreds(creds: LibCreds): Promise<LibCreds> {
 export async function markLibBound(at = Date.now()): Promise<void> {
   const cur = await getLibCreds();
   if (!cur) return;
-  await getKV().set(KEY, { ...cur, at });
+  await writeSecure(KEY, { ...cur, at });
 }
 
 export async function clearLibCreds(): Promise<void> {

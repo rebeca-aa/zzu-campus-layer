@@ -1813,7 +1813,7 @@ export function MineView(props: {
             <span class="ic"><MineIcon name="library" /></span>
             <span class="tx">
               <span class="t">图书馆登录</span>
-              <span class="s">另一套账号（学号 + 图书馆密码）</span>
+              <span class="s">另一套账号（学号 + 图书馆密码，加密存本机）</span>
             </span>
             <span class="chev">›</span>
           </button>

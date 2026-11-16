@@ -28,19 +28,42 @@ import java.nio.charset.StandardCharsets;
 final class LibSeatClient {
     private static final String API = "http://order.lib.zzu.edu.cn/v4/Space/seat";
     private static final String PREFS = "campus_layer";
-    private static final String KEY_TOKEN = "lib_token";
+    /** 老版本存明文的键（只在迁移时读一次） */
+    private static final String KEY_TOKEN_LEGACY = "lib_token";
+    /** 加密后的 token（SecretStore 封出来的 v1: 信封） */
+    private static final String KEY_TOKEN_SEALED = "lib_token_v2";
 
     private LibSeatClient() {}
 
     static void saveToken(Context ctx, String token) {
         if (token == null || token.trim().isEmpty()) return;
+        String clean = token.trim();
         SharedPreferences sp = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
-        sp.edit().putString(KEY_TOKEN, token.trim()).apply();
+        String sealed = SecretStore.seal(clean);
+        if (sealed != null) {
+            /* 加密成功：顺手把老版本的明文删掉，别留两份 */
+            sp.edit().putString(KEY_TOKEN_SEALED, sealed).remove(KEY_TOKEN_LEGACY).apply();
+        } else {
+            /* Keystore 不可用（极少数老机器）：退回明文，不能让登录直接坏掉 */
+            sp.edit().putString(KEY_TOKEN_LEGACY, clean).apply();
+        }
     }
 
     static String token(Context ctx) {
         SharedPreferences sp = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
-        return sp.getString(KEY_TOKEN, "");
+        String sealed = sp.getString(KEY_TOKEN_SEALED, "");
+        if (sealed == null || sealed.isEmpty()) {
+            /* 老版本存的是明文：读到就迁成密文，再把读出来的明文照常返回 */
+            SecretStore.migrateLegacy(sp, KEY_TOKEN_LEGACY, KEY_TOKEN_SEALED);
+            sealed = sp.getString(KEY_TOKEN_SEALED, "");
+        }
+        if (sealed != null && !sealed.isEmpty()) {
+            String opened = SecretStore.open(sealed);
+            /* 解不开说明钥匙没了（清了 Keystore / 换签名装过），当没登录，让用户重新登一次 */
+            return opened == null ? "" : opened;
+        }
+        String legacy = sp.getString(KEY_TOKEN_LEGACY, "");
+        return legacy == null ? "" : legacy;
     }
 
     static boolean loggedIn(Context ctx) {

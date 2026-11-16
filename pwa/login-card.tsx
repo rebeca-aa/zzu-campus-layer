@@ -17,6 +17,7 @@ import {
 import { canMintInBrowser } from '../src/core/casMint';
 import { getAppCreds, markCredsTrusted, saveAppCreds, type StoredAppCreds } from '../src/core/creds';
 import { describeLib, getLibCreds, markLibBound, saveLibCreds, type LibCreds } from '../src/core/libCreds';
+import { secureAvailable } from '../src/core/secure';
 import { saveToken } from '../src/core/storage';
 
 type Mode = 'shell' | 'fetch' | 'none';
@@ -53,6 +54,8 @@ export function LoginPage({ signedIn, onSignedIn, onOpenLogin }: Props) {
   const [lib, setLib] = useState<LibCreds | null>(null);
   const [libPwd, setLibPwd] = useState('');
   const [libNote, setLibNote] = useState('');
+  /** 这台环境能不能把密码加密存（没有 crypto.subtle 的老 WebView 不能） */
+  const [sealed, setSealed] = useState<boolean | null>(null);
 
   useEffect(() => {
     void (async () => {
@@ -60,6 +63,7 @@ export function LoginPage({ signedIn, onSignedIn, onOpenLogin }: Props) {
       setSaved(got);
       if (got) setAccount(got.account);
       setLib(await getLibCreds());
+      setSealed(await secureAvailable());
     })();
   }, []);
 
@@ -245,6 +249,12 @@ export function LoginPage({ signedIn, onSignedIn, onOpenLogin }: Props) {
           {busy ? (phase.what ?? '处理中…') : inCode ? '确认' : mode === 'none' ? '去登录' : '登录'}
         </button>
         {note && <p class="hint warn">{note}</p>}
+        {sealed === true && (
+          <p class="hint">密码用 AES-GCM 加密后存在本机，钥匙在本机密钥库；不上传、不进同步码。</p>
+        )}
+        {sealed === false && (
+          <p class="hint">这台环境不支持加密，密码按旧方式存在本机；换设备前记得在「其他方式」里清一下。</p>
+        )}
       </div>
 
       {mode !== 'none' && (
