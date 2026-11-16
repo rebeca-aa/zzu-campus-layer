@@ -420,6 +420,20 @@ export function parseDueAt(text: string, now = Date.now()): number | null {
     return d.getTime();
   };
 
+  // 0) 带年份：2027.1.14 / 2027-01-14 / 2027年1月14日
+  const fullRe = /(\d{4})\s*[.\-/年]\s*(\d{1,2})\s*[.\-/月]\s*(\d{1,2})/;
+  const full = fullRe.exec(src);
+  if (full) {
+    const year = Number(full[1]);
+    const month = Number(full[2]);
+    const day = Number(full[3]);
+    if (year >= 2000 && year <= 2100 && month >= 1 && month <= 12 && day >= 1 && day <= 31) {
+      const d = new Date(base);
+      d.setFullYear(year, month - 1, day);
+      return setAt(d);
+    }
+  }
+
   // 1) 绝对日期：11-16 / 11月16日 / 11/16 / 11月16号
   //    注意别把「习题册 3.1–3.4」里的 1-3 当成日期
   const absRe = /(\d{1,2})\s*[-月/]\s*(\d{1,2})/g;
@@ -429,6 +443,27 @@ export function parseDueAt(text: string, now = Date.now()): number | null {
     if (/[\d.]/.test(before) || /[\d.]/.test(after)) continue;
     const month = Number(abs[1]);
     const day = Number(abs[2]);
+    if (month < 1 || month > 12 || day < 1 || day > 31) continue;
+    const d = new Date(base);
+    d.setMonth(month - 1, day);
+    let ts = setAt(d);
+    if (ts < now - 7 * DAY) {
+      d.setFullYear(d.getFullYear() + 1);
+      ts = setAt(d);
+    }
+    return ts;
+  }
+
+  // 1.2) 点分隔：11.15（跳过 3.1–3.4、2.1的课后习题 这类章节号）
+  const dotRe = /(?<![\d.])(\d{1,2})\.(\d{1,2})(?![\d.])/g;
+  for (let m = dotRe.exec(src); m; m = dotRe.exec(src)) {
+    const before = src.slice(Math.max(0, m.index - 2), m.index);
+    const after = src.slice(m.index + m[0].length, m.index + m[0].length + 2);
+    if (/[–—~～-]/.test(after.slice(0, 1)) || /[–—~～-]$/.test(before)) continue;
+    if (/^[的第册题章节页]/.test(after)) continue;
+    if (/[第]$/.test(before)) continue;
+    const month = Number(m[1]);
+    const day = Number(m[2]);
     if (month < 1 || month > 12 || day < 1 || day > 31) continue;
     const d = new Date(base);
     d.setMonth(month - 1, day);

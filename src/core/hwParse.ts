@@ -15,6 +15,7 @@
 import { LlmError, llmChat, llmChatVision, resolveProvider, visionModelFor } from './llm';
 import { getLlmSettings, type LlmSettingsStored } from './storage';
 import { parseDueAt, parseHomework, type HomeworkDraft } from './homework';
+import { parseByStructure } from './hwRules';
 
 const DAY = 86_400_000;
 /** 一次最多出这条数，多了用户也懒得看 */
@@ -257,6 +258,12 @@ export function splitSegments(text: string): string[] {
   return out.slice(0, 6);
 }
 function ruleOutcome(text: string, now: number, note: string): HwParseOutcome {
+  /* 先按「结构」认（块型 / 列表型 / 单条），认不出来再退回老的按句切 */
+  const byStructure = parseByStructure(text, now);
+  if (byStructure.drafts.length > 0) {
+    const merged = note ? `${note} · ${byStructure.info}` : byStructure.info;
+    return { drafts: byStructure.drafts, via: 'rule', note: merged };
+  }
   return { drafts: parseHomework(text, now), via: 'rule', note };
 }
 

@@ -2575,9 +2575,15 @@ html[data-theme='pink'] .grid .course .tag {
 }
 .hw-draft-sub {
   display: grid;
-  grid-template-columns: 1fr 1.15fr auto;
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 1.7fr) 26px;
   gap: 6px;
   margin-top: 6px;
+  align-items: center;
+}
+/* 原生日期控件默认太窄，会把自己截断 */
+.hw-draft-sub input[type='datetime-local'] {
+  font-size: 12px;
+  padding: 0 6px;
 }
 .hw-draft-sub input {
   min-width: 0;
