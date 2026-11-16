@@ -656,13 +656,14 @@ function HomeBars(props: {
     };
   }, []);
 
-  const builtinBars = (fixed.library ? props.bars : props.bars.filter((bar) => !isLibraryBar(bar))).filter(isBuiltinBar);
   const customBars = (fixed.library ? props.bars : props.bars.filter((bar) => !isLibraryBar(bar))).filter(
     (bar) => !isBuiltinBar(bar),
   );
-  /* 有 logo 的先排：图书馆、校园卡；没有 logo 的空教室排后面 */
-  const withLogo = builtinBars.filter((bar) => barGlyphOf(bar) !== 'room');
-  const withoutLogo = builtinBars.filter((bar) => barGlyphOf(bar) === 'room');
+  const libraryBar = fixed.library ? props.bars.find(isLibraryBar) : undefined;
+  /* 空教室：内置里除图书馆、校园卡之外的那条 */
+  const roomBars = props.bars.filter(
+    (bar) => isBuiltinBar(bar) && !isCardBar(bar) && !isLibraryBar(bar),
+  );
 
   const openSheet = () => {
     setError('');
@@ -765,69 +766,13 @@ function HomeBars(props: {
         </button>
       </div>
       <div class="bars-grid">
-        {/* 有 logo 的先排：图书馆、校园卡 */}
-        {withLogo.map((bar) =>
-          isCardBar(bar) ? (
-            <button
-              type="button"
-              class="bar bar-card"
-              key={bar.id}
-              onClick={props.onCardClick}
-              title="点一下刷新一卡通余额"
-            >
-              <span class="bar-ic">
-                <BarGlyph name="card" />
-              </span>
-              <span class="bar-txt">
-                <span class="bar-t">{bar.label}</span>
-                <span class="bar-s">{props.cardBusy ? '正在查余额…' : props.cardText || '点一下查余额'}</span>
-              </span>
-            </button>
-          ) : isLibraryBar(bar) ? (
-            /* 图书馆这条不再往会话里发话：点开就是座位图页，跟天气、作业一样是个入口 */
-            <button type="button" class="bar" key={bar.id} onClick={props.onLibrary}>
-              <span class="bar-ic">
-                <BarGlyph name="book" />
-              </span>
-              <span class="bar-txt">
-                <span class="bar-t">{bar.label}</span>
-                <span class="bar-s">点开看各楼层座位</span>
-              </span>
-            </button>
-          ) : (
-            /* 兜底：别让任何一条内置栏在页面上凭空消失 */
-            <button
-              type="button"
-              class="bar"
-              key={bar.id}
-              onClick={() => props.onPick(bar.text)}
-              title={bar.text === bar.label ? undefined : bar.text}
-            >
-              <span class="bar-ic">
-                <BarGlyph name={barGlyphOf(bar)} />
-              </span>
-              <span class="bar-txt">
-                <span class="bar-t">{bar.label}</span>
-                <span class="bar-s">{bar.text}</span>
-              </span>
-            </button>
-          ),
-        )}
-        {/* 天气：小字直接是当日实时气温和天气；显隐开关在设置窗里 */}
-        {fixed.weather ? (
-          <button type="button" class="bar" onClick={props.onWeather}>
-            <span class="bar-ic">
-              <BarGlyph name="wx" />
-            </span>
-            <span class="bar-txt">
-              <span class="bar-t">天气</span>
-              {wxLine ? <span class="bar-s">{wxLine}</span> : null}
-            </span>
-          </button>
-        ) : null}
-        {/* 作业：红点表示有逾期 */}
+        {/* 顺序固定：作业 → 空教室 → 图书馆 → 天气；校园卡与备忘录不在主页显示 */}
         {fixed.homework ? (
-          <button type="button" class={`bar bar-tile-hw${props.hwDot ? ' alert' : ''}`} onClick={props.onHomework}>
+          <button
+            type="button"
+            class={`bar bar-tile-hw${props.hwDot ? ' alert' : ''}`}
+            onClick={props.onHomework}
+          >
             {props.hwDot ? <span class="bar-dot" /> : null}
             <span class="bar-ic">
               <BarGlyph name="hw" />
@@ -838,8 +783,7 @@ function HomeBars(props: {
             </span>
           </button>
         ) : null}
-        {/* 空教室没有 logo，排在四条有 logo 的后面 */}
-        {withoutLogo.map((bar) => (
+        {roomBars.map((bar) => (
           <button
             type="button"
             class="bar"
@@ -853,6 +797,28 @@ function HomeBars(props: {
             </span>
           </button>
         ))}
+        {libraryBar ? (
+          <button type="button" class="bar" onClick={props.onLibrary}>
+            <span class="bar-ic">
+              <BarGlyph name="book" />
+            </span>
+            <span class="bar-txt">
+              <span class="bar-t">{libraryBar.label}</span>
+              <span class="bar-s">点开看各楼层座位</span>
+            </span>
+          </button>
+        ) : null}
+        {fixed.weather ? (
+          <button type="button" class="bar" onClick={props.onWeather}>
+            <span class="bar-ic">
+              <BarGlyph name="wx" />
+            </span>
+            <span class="bar-txt">
+              <span class="bar-t">天气</span>
+              {wxLine ? <span class="bar-s">{wxLine}</span> : null}
+            </span>
+          </button>
+        ) : null}
       </div>
       {customBars.map((bar) => (
         <button
@@ -868,7 +834,7 @@ function HomeBars(props: {
           </span>
         </button>
       ))}
-      {builtinBars.length === 0 && customBars.length === 0 && !fixed.weather && !fixed.homework ? (
+      {!libraryBar && roomBars.length === 0 && customBars.length === 0 && !fixed.weather && !fixed.homework ? (
         <p class="bars-empty">主页入口都藏起来了：点右上角 + 打开「显示」重新勾上。</p>
       ) : null}
       {sheet
@@ -905,22 +871,6 @@ function HomeBars(props: {
                       <span class="bs-sw-t">
                         图书馆
                         <em>点开看各楼层座位</em>
-                      </span>
-                      <span class="bs-knob" aria-hidden="true" />
-                    </button>
-                    <button
-                      type="button"
-                      class={`bs-sw${cardOn ? ' on' : ''}`}
-                      role="switch"
-                      aria-checked={cardOn}
-                      onClick={toggleCard}
-                    >
-                      <span class="bs-sw-ic">
-                        <BarGlyph name="card" />
-                      </span>
-                      <span class="bs-sw-t">
-                        校园卡
-                        <em>只查余额，不进会话</em>
                       </span>
                       <span class="bs-knob" aria-hidden="true" />
                     </button>
