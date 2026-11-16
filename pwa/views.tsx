@@ -499,12 +499,10 @@ interface BarDraft {
   id: string | null;
   kind: 'chat' | 'card';
   label: string;
-  /** 出厂那条图书馆：点它进座位图，不用写话术，也不许删 */
-  lock?: boolean;
   text: string;
 }
 
-/** 设置窗打开时的草稿：栏列表 + 图书馆 / 天气 / 作业的显隐 */
+/** 设置窗打开时的草稿：快捷语列表 + 图书馆 / 天气 / 作业的显隐 */
 interface BarSheet {
   rows: BarDraft[];
   fixed: HomeBarFixed;
@@ -514,14 +512,14 @@ let draftSeq = 0;
 const newDraftKey = () => `d${(draftSeq += 1)}`;
 
 function draftOf(bars: HomeBar[]): BarDraft[] {
-  return bars.map((bar) => {
+  /* 图书馆是纯入口条，不是快捷语：不进设置页的列表，改由上面的开关管 */
+  return bars.filter((bar) => !isLibraryBar(bar)).map((bar) => {
     const kind = bar.kind ?? 'chat';
     return {
       key: bar.id,
       id: bar.id,
       kind,
       label: bar.label,
-      lock: isLibraryBar(bar),
       text: kind === 'card' ? '' : bar.text,
     };
   });
@@ -731,20 +729,23 @@ function HomeBars(props: {
   const saveAll = async () => {
     if (!sheet) return;
     try {
-      /* 老栏按原顺序留下（一卡通归开关管），再逐条套用改动；新栏接在后面 */
-      let next = props.bars.filter((bar) => !isCardBar(bar) && chatRows.some((row) => row.id === bar.id));
+      /*
+       * 老栏按原顺序留下（一卡通归开关管，图书馆那条不在草稿里、原样留着），
+       * 再逐条套用改动；新栏接在后面
+       */
+      let next = props.bars.filter(
+        (bar) => isLibraryBar(bar) || (!isCardBar(bar) && chatRows.some((row) => row.id === bar.id)),
+      );
       for (const row of chatRows) {
         const text = row.text.trim();
         const label = row.label.trim();
-        /* 整行空着就当没加；图书馆那条没有话术，不算漏填 */
+        /* 整行空着就当没加 */
         if (!text && !label) continue;
-        if (!text && !row.lock) throw new Error('有一条还没写要发给 AI 的话');
-        /* 图书馆那条只改标题，正文留着（它只用来认出这是出厂那条） */
-        const body = row.lock ? row.text || '图书馆座位图' : text;
+        if (!text) throw new Error('有一条还没写要发给 AI 的话');
         next =
           row.id && next.some((bar) => bar.id === row.id)
-            ? updateHomeBar(next, row.id, { label, text: body })
-            : addHomeBar(next, body, label);
+            ? updateHomeBar(next, row.id, { label, text })
+            : addHomeBar(next, text, label);
       }
       props.onChange(setCardBarVisible(next, cardOn));
       setFixed(await saveHomeBarFixed(sheet.fixed));
@@ -863,10 +864,10 @@ function HomeBars(props: {
                 if (e.target === e.currentTarget) closeSheet();
               }}
             >
-              <div class="bar-sheet-panel" role="dialog" aria-modal="true" aria-label="主页栏位设置">
+              <div class="bar-sheet-panel" role="dialog" aria-modal="true" aria-label="主页快捷语设置">
                 <div class="bs-head">
                   <div class="bs-head-t">
-                    主页栏位
+                    主页快捷语
                     <span class="bs-sub">开关控制显示哪些入口，改完点保存</span>
                   </div>
                   <button type="button" class="bs-x" aria-label="关闭" onClick={closeSheet}>
@@ -926,48 +927,37 @@ function HomeBars(props: {
                     </button>
                   </div>
                   <p class="bs-sec">
-                    栏位
+                    快捷语
                     <span class="bs-count">
                       {chatRows.length} / {MAX_HOME_BARS}
                     </span>
                   </p>
                   <div class="bs-list">
                     {chatRows.map((row) => (
-                      <div class={`bs-row${row.lock ? ' bs-lock' : ''}`} key={row.key}>
+                      <div class="bs-row" key={row.key}>
                         <div class="bs-top">
-                          {row.lock ? (
-                            /* 图书馆是固定入口：名字不能改，否则认不出是不是它 */
-                            <span class="bs-lock-name">{row.label}</span>
-                          ) : (
-                            <input
-                              class="bs-label"
-                              value={row.label}
-                              maxLength={MAX_HOME_BAR_LABEL}
-                              placeholder="标题，留空就用正文开头"
-                              onInput={(e) => patchRow(row.key, { label: (e.target as HTMLInputElement).value })}
-                            />
-                          )}
-                          {row.lock ? null : (
-                            <button type="button" class="bs-del" aria-label="删掉这一条" onClick={() => dropRow(row.key)}>
-                              删除
-                            </button>
-                          )}
-                        </div>
-                        {row.lock ? (
-                          <p class="bs-lock-note">这条点开就是座位图页，不用写话术，也不能删。</p>
-                        ) : (
-                          <textarea
-                            class="bs-text"
-                            value={row.text}
-                            rows={2}
-                            maxLength={MAX_HOME_BAR_TEXT}
-                            placeholder="点这条栏会把这句直接发给 AI"
-                            onInput={(e) => patchRow(row.key, { text: (e.target as HTMLTextAreaElement).value })}
+                          <input
+                            class="bs-label"
+                            value={row.label}
+                            maxLength={MAX_HOME_BAR_LABEL}
+                            placeholder="标题，留空就用正文开头"
+                            onInput={(e) => patchRow(row.key, { label: (e.target as HTMLInputElement).value })}
                           />
-                        )}
+                          <button type="button" class="bs-del" aria-label="删掉这一条" onClick={() => dropRow(row.key)}>
+                            删除
+                          </button>
+                        </div>
+                        <textarea
+                          class="bs-text"
+                          value={row.text}
+                          rows={2}
+                          maxLength={MAX_HOME_BAR_TEXT}
+                          placeholder="点这条栏会把这句直接发给 AI"
+                          onInput={(e) => patchRow(row.key, { text: (e.target as HTMLTextAreaElement).value })}
+                        />
                       </div>
                     ))}
-                    {chatRows.length === 0 ? <p class="bars-empty">还没有栏，点下面「加一条」。</p> : null}
+                    {chatRows.length === 0 ? <p class="bars-empty">还没有快捷语，点下面「加一条」。</p> : null}
                   </div>
                   {error ? <p class="hint warn">{error}</p> : null}
                 </div>
