@@ -34,7 +34,7 @@ import {
   type HomeBarFixed,
 } from '../src/core/homeBars';
 
-export type TabKey = 'home' | 'ai' | 'weather' | 'schedule' | 'mine';
+export type TabKey = 'home' | 'ai' | 'weather' | 'schedule' | 'mine' | 'seat';
 
 /** 一次工具调用的结果；失败时 ok=false，error 是给人看的一句话 */
 export type Caller = (name: string, args?: Record<string, unknown>) => Promise<{ ok: boolean; data?: any; error?: string }>;
@@ -178,8 +178,8 @@ function TabIcon({ name }: { name: TabKey }) {
 }
 
 export function TabBar({ tab, onTab }: { tab: TabKey; onTab: (t: TabKey) => void }) {
-  /* 课表 / 天气不是底部入口，但它们是从主页点进来的，所以高亮仍然停在「主页」 */
-  const shown: TabKey = tab === 'schedule' || tab === 'weather' ? 'home' : tab;
+  /* 课表 / 天气 / 图书馆座位不是底部入口，但它们是从主页点进来的，所以高亮仍然停在「主页」 */
+  const shown: TabKey = tab === 'schedule' || tab === 'weather' || tab === 'seat' ? 'home' : tab;
   return (
     <nav class="tabbar">
       {TABS.map((t) => (
@@ -243,6 +243,8 @@ export function HomeView(props: {
   onOpenSchedule: () => void;
   /** 点「天气」小块进天气页 */
   onWeather: () => void;
+  /** 点「图书馆」条进座位图页（这条不再把话发给 AI） */
+  onLibrary: () => void;
   /** 作业块：一行文案 + 逾期红点；点进作业页 */
   hw?: { text: string; dot?: boolean } | null;
   onHomework: () => void;
@@ -453,6 +455,7 @@ export function HomeView(props: {
           cardBusy={cardBusy}
           onCardClick={loadCard}
           onWeather={props.onWeather}
+          onLibrary={props.onLibrary}
           hwText={props.hw?.text ?? '还没作业'}
           hwDot={Boolean(props.hw?.dot)}
           onHomework={props.onHomework}
@@ -495,6 +498,8 @@ interface BarDraft {
   id: string | null;
   kind: 'chat' | 'card';
   label: string;
+  /** 出厂那条图书馆：点它进座位图，不用写话术，也不许删 */
+  lock?: boolean;
   text: string;
 }
 
@@ -510,7 +515,14 @@ const newDraftKey = () => `d${(draftSeq += 1)}`;
 function draftOf(bars: HomeBar[]): BarDraft[] {
   return bars.map((bar) => {
     const kind = bar.kind ?? 'chat';
-    return { key: bar.id, id: bar.id, kind, label: bar.label, text: kind === 'card' ? '' : bar.text };
+    return {
+      key: bar.id,
+      id: bar.id,
+      kind,
+      label: bar.label,
+      lock: isLibraryBar(bar),
+      text: kind === 'card' ? '' : bar.text,
+    };
   });
 }
 
@@ -599,6 +611,8 @@ function HomeBars(props: {
   onCardClick: () => void;
   /** 点天气块进天气页 */
   onWeather: () => void;
+  /** 点图书馆条进座位图页 */
+  onLibrary: () => void;
   /** 作业：一行文字 + 逾期红点 */
   hwText: string;
   hwDot: boolean;
@@ -709,13 +723,15 @@ function HomeBars(props: {
       for (const row of chatRows) {
         const text = row.text.trim();
         const label = row.label.trim();
-        /* 整行空着就当没加 */
+        /* 整行空着就当没加；图书馆那条没有话术，不算漏填 */
         if (!text && !label) continue;
-        if (!text) throw new Error('有一条还没写要发给 AI 的话');
+        if (!text && !row.lock) throw new Error('有一条还没写要发给 AI 的话');
+        /* 图书馆那条只改标题，正文留着（它只用来认出这是出厂那条） */
+        const body = row.lock ? row.text || '图书馆座位图' : text;
         next =
           row.id && next.some((bar) => bar.id === row.id)
-            ? updateHomeBar(next, row.id, { label, text })
-            : addHomeBar(next, text, label);
+            ? updateHomeBar(next, row.id, { label, text: body })
+            : addHomeBar(next, body, label);
       }
       props.onChange(setCardBarVisible(next, cardOn));
       setFixed(await saveHomeBarFixed(sheet.fixed));
@@ -767,7 +783,19 @@ function HomeBars(props: {
                 <span class="bar-s">{props.cardBusy ? '正在查余额…' : props.cardText || '点一下查余额'}</span>
               </span>
             </button>
+          ) : isLibraryBar(bar) ? (
+            /* 图书馆这条不再往会话里发话：点开就是座位图页，跟天气、作业一样是个入口 */
+            <button type="button" class="bar" key={bar.id} onClick={props.onLibrary}>
+              <span class="bar-ic">
+                <BarGlyph name="book" />
+              </span>
+              <span class="bar-txt">
+                <span class="bar-t">{bar.label}</span>
+                <span class="bar-s">点开看各楼层座位</span>
+              </span>
+            </button>
           ) : (
+            /* 兜底：别让任何一条内置栏在页面上凭空消失 */
             <button
               type="button"
               class="bar"
@@ -876,7 +904,7 @@ function HomeBars(props: {
                       </span>
                       <span class="bs-sw-t">
                         图书馆
-                        <em>一楼空座位图</em>
+                        <em>点开看各楼层座位</em>
                       </span>
                       <span class="bs-knob" aria-hidden="true" />
                     </button>
@@ -937,27 +965,38 @@ function HomeBars(props: {
                   </p>
                   <div class="bs-list">
                     {chatRows.map((row) => (
-                      <div class="bs-row" key={row.key}>
+                      <div class={`bs-row${row.lock ? ' bs-lock' : ''}`} key={row.key}>
                         <div class="bs-top">
-                          <input
-                            class="bs-label"
-                            value={row.label}
-                            maxLength={MAX_HOME_BAR_LABEL}
-                            placeholder="标题，留空就用正文开头"
-                            onInput={(e) => patchRow(row.key, { label: (e.target as HTMLInputElement).value })}
-                          />
-                          <button type="button" class="bs-del" aria-label="删掉这一条" onClick={() => dropRow(row.key)}>
-                            删除
-                          </button>
+                          {row.lock ? (
+                            /* 图书馆是固定入口：名字不能改，否则认不出是不是它 */
+                            <span class="bs-lock-name">{row.label}</span>
+                          ) : (
+                            <input
+                              class="bs-label"
+                              value={row.label}
+                              maxLength={MAX_HOME_BAR_LABEL}
+                              placeholder="标题，留空就用正文开头"
+                              onInput={(e) => patchRow(row.key, { label: (e.target as HTMLInputElement).value })}
+                            />
+                          )}
+                          {row.lock ? null : (
+                            <button type="button" class="bs-del" aria-label="删掉这一条" onClick={() => dropRow(row.key)}>
+                              删除
+                            </button>
+                          )}
                         </div>
-                        <textarea
-                          class="bs-text"
-                          value={row.text}
-                          rows={2}
-                          maxLength={MAX_HOME_BAR_TEXT}
-                          placeholder="点这条栏会把这句直接发给 AI"
-                          onInput={(e) => patchRow(row.key, { text: (e.target as HTMLTextAreaElement).value })}
-                        />
+                        {row.lock ? (
+                          <p class="bs-lock-note">这条点开就是座位图页，不用写话术，也不能删。</p>
+                        ) : (
+                          <textarea
+                            class="bs-text"
+                            value={row.text}
+                            rows={2}
+                            maxLength={MAX_HOME_BAR_TEXT}
+                            placeholder="点这条栏会把这句直接发给 AI"
+                            onInput={(e) => patchRow(row.key, { text: (e.target as HTMLTextAreaElement).value })}
+                          />
+                        )}
                       </div>
                     ))}
                     {chatRows.length === 0 ? <p class="bars-empty">还没有栏，点下面「加一条」。</p> : null}

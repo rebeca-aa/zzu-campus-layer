@@ -72,6 +72,39 @@ describe('seatMapSvg', () => {
   });
 });
 
+describe('宽而扁的房间（座位横排、纵向跨度很小时）', () => {
+  const wide = parseSeatMap({
+    data: {
+      list: [
+        seat('001', 0, 0),
+        seat('002', 300, 0),
+        seat('003', 600, 0),
+        seat('004', 0, 40, '使用中'),
+        seat('005', 300, 40),
+        seat('006', 600, 40),
+      ],
+    },
+  });
+
+  it('按内容收高度，座位不会被画到画布下沿外面', () => {
+    const svg = seatMapSvg(wide, { width: 400 })!;
+    const m = /width="(\d+)" height="(\d+)"/.exec(svg)!;
+    const h = Number(m[2]);
+    const ys = [...svg.matchAll(/ cy="([\d.]+)"/g)].map((mm) => Number(mm[1]));
+    expect(ys.length).toBeGreaterThanOrEqual(6);
+    expect(Math.max(...ys)).toBeLessThan(h);
+  });
+
+  it('图例落在底板下沿的留白里，不压最后一排座位', () => {
+    const svg = seatMapSvg(wide, { width: 400 })!;
+    const h = Number(/height="(\d+)"/.exec(svg)![1]);
+    const legendY = h - 41; /* seatMapSvg 把图例画在 H-41 这一行 */
+    const ys = [...svg.matchAll(/ cy="([\d.]+)"/g)].map((mm) => Number(mm[1]));
+    const seatYs = ys.filter((y) => Math.abs(y - legendY) > 0.01);
+    expect(Math.max(...seatYs)).toBeLessThan(legendY - 6);
+  });
+});
+
 describe('真实一楼大厅 216 个座位', () => {
   const raw = JSON.parse(readFileSync(new URL('./fixtures/library-seat-full.json', import.meta.url), 'utf8'));
 

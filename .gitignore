@@ -33,3 +33,6 @@ tmp/
 *.bak
 .audit.json
 /tmp-*.txt
+
+# 本地截图存档
+shots/

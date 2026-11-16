@@ -54,6 +54,7 @@ import { displayDayShanghai, msUntilMidnightShanghai, msUntilRollover, todayShan
 import type { Term } from '../src/core/types';
 import { NoticeBoard } from '../src/ui/notice';
 import { HomeView, HomeworkView, HueLine, LineSlider, MineView, ScheduleView, TabBar, WeatherView, type Caller, type TabKey } from './views';
+import { SeatMapView } from './seatmap';
 import {
   DEFAULT_SETTINGS,
   addHomework,
@@ -1328,6 +1329,10 @@ const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
               setNavDir('fwd');
               goTab('weather');
             }}
+            onLibrary={() => {
+              setNavDir('fwd');
+              goTab('seat');
+            }}
             hw={hwTile}
             onHomework={() => openSub('homework')}
             bars={homeBars}
@@ -1366,6 +1371,12 @@ const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
       {tab === 'weather' && (
         <div class="page-live" key="weather">
           <WeatherView today={today} />
+        </div>
+      )}
+
+      {tab === 'seat' && (
+        <div class="page-live" key="seat">
+          <SeatMapView onBack={() => goTab('home')} />
         </div>
       )}
 

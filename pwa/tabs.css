@@ -2610,3 +2610,202 @@ html[data-theme='cream'] .hw-chip b.bad { color: #b4342f; }
 .bar-tile-hw .bar-s { color: var(--dim); }
 .bar-tile-hw.alert .bar-s { color: color-mix(in srgb, #ef6b6b 55%, var(--text)); }
 
+
+/* 设置窗里「图书馆」那条：名字固定，没有话术输入框，也不能删 */
+.bs-lock {
+  background: color-mix(in srgb, var(--panel) 92%, var(--text));
+}
+.bs-lock-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+}
+.bs-lock-note {
+  margin: 0;
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: var(--dim);
+}
+
+/* ---------- 图书馆座位图页 ---------- */
+
+/* 今天 / 明天：两张大一点的按钮，占满一行 */
+.seat-day {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 9px;
+}
+.seat-day button {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--text);
+  font: inherit;
+  font-size: 14px;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.seat-day button b {
+  font-weight: 600;
+}
+.seat-day button span {
+  font-size: 11.5px;
+  color: var(--dim);
+}
+.seat-day button.on {
+  border-color: color-mix(in srgb, var(--accent) 58%, var(--line));
+  background: color-mix(in srgb, var(--accent) 13%, var(--panel));
+}
+.seat-day button.on b {
+  color: var(--accent);
+}
+.seat-day button.on span {
+  color: color-mix(in srgb, var(--accent) 65%, var(--text));
+}
+
+/* 楼层：一行四格 */
+.seat-floors {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 7px;
+}
+.seat-floors button {
+  padding: 8px 0;
+  border-radius: 11px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--dim);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.seat-floors button.on {
+  color: var(--text);
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--line));
+  background: color-mix(in srgb, var(--accent) 15%, var(--panel));
+}
+
+/* 该层的房间：两列小卡，名字长了截断；只有一间时占满一行 */
+.seat-areas {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+.seat-areas.solo {
+  grid-template-columns: minmax(0, 1fr);
+}
+.seat-area {
+  min-width: 0;
+  text-align: left;
+  padding: 9px 11px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  font: inherit;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.seat-area .sa-n {
+  display: block;
+  font-size: 12.5px;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.seat-area .sa-c {
+  display: block;
+  margin-top: 3px;
+  font-size: 11.5px;
+  color: var(--dim);
+}
+.seat-area.on {
+  border-color: color-mix(in srgb, var(--accent) 60%, var(--line));
+  background: color-mix(in srgb, var(--accent) 10%, var(--panel));
+}
+.seat-area.on .sa-c {
+  color: var(--text);
+}
+
+/* 座位图卡片：图上自带上边距，这里只兜底 */
+.seat-card {
+  border: 1px solid var(--line);
+  background: var(--panel);
+  border-radius: 16px;
+  padding: 10px;
+}
+.seat-cap {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 2px 3px 9px;
+  font-size: 13px;
+}
+.seat-cap b {
+  font-weight: 600;
+}
+.seat-cap span {
+  font-size: 12px;
+  color: var(--dim);
+}
+.seat-img {
+  display: block;
+  width: 100%;
+  border-radius: 12px;
+}
+
+/* 服务端没给坐标时退回座位号方格 */
+.seat-nos {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  padding: 2px;
+}
+.seat-nos .sn {
+  padding: 4px 6px;
+  border-radius: 7px;
+  border: 1px solid var(--line);
+  font: 11px/1.2 ui-monospace, Menlo, Consolas, monospace;
+  color: var(--dim);
+}
+.seat-nos .sn.free {
+  color: var(--ok);
+  border-color: color-mix(in srgb, var(--ok) 45%, var(--line));
+  background: color-mix(in srgb, var(--ok) 12%, transparent);
+}
+
+/* 读不到 / 没登录 */
+.seat-fail {
+  border: 1px solid var(--line);
+  background: var(--panel);
+  border-radius: 16px;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 11px;
+  align-items: flex-start;
+}
+.seat-fail p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.65;
+  color: var(--dim);
+}
+.seat-fail-acts {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.seat-note {
+  margin: 0;
+  font-size: 11.5px;
+  line-height: 1.7;
+  color: var(--dim);
+}

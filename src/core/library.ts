@@ -697,7 +697,8 @@ export function seatMapSvg(m: LibSeatMap, opts: { width?: number; labels?: boole
 
   let y = HEAD_H;
   for (const p of panels) {
-    const h = ROOM_HEAD + p.height;
+    /* 底下留一条 26 的横带，图例就落在这条带里，不会压到最后一排座位 */
+    const h = ROOM_HEAD + p.height + 26;
     parts.push(`<g transform="translate(0,${y})">`);
     parts.push(
       `<rect x="${PLATE_X}" y="0" width="${plateW}" height="${h}" rx="16" fill="${PLATE_BG}" stroke="${PLATE_LINE}"/>`,
@@ -719,7 +720,7 @@ export function seatMapSvg(m: LibSeatMap, opts: { width?: number; labels?: boole
 
   const H = y - 14 + FOOT_H;
   parts.push(
-    `<g transform="translate(${PLATE_X + 8},${H - 19})">`,
+    `<g transform="translate(${PLATE_X + 8},${H - 41})">`,
     `<circle cx="0" cy="0" r="4.2" fill="${MAP_FREE}"/>`,
     `<text x="9" y="4" fill="${MAP_MUTED}" font-size="11.5" font-family="system-ui,sans-serif">空闲</text>`,
     `<circle cx="62" cy="0" r="4.2" fill="${MAP_TAKEN}"/>`,
@@ -769,9 +770,9 @@ function layoutSeatMap(
   const scale = Math.min((W - PAD * 2) / spanX, (maxH - PAD * 2) / spanY);
   const usedW = spanX * scale;
   const usedH = spanY * scale;
-  /* 房间里座位少的时候居中摆，不要都挤在左上角 */
+  /* 房间宽扁时座位少：左右居中摆，别都挤在左边；纵向跟着内容走，不留大空档 */
   const ox = PAD + Math.max(0, (W - PAD * 2 - usedW) / 2);
-  const oy = PAD + Math.max(0, (maxH - PAD * 2 - usedH) / 2);
+  const oy = PAD;
   const H = Math.max(60, Math.round(usedH + PAD * 2));
   const r = Math.max(3.2, Math.min(8, scale * 0.62));
 
