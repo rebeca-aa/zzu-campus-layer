@@ -176,11 +176,19 @@ describe('天气 / 作业 / 图书馆开关', () => {
   });
 
   it('只认布尔值，缺的字段按默认开', async () => {
-    expect(normalizeHomeBarFixed({ weather: false })).toEqual({ library: true, weather: false, homework: true });
+    expect(normalizeHomeBarFixed({ weather: false })).toEqual({
+      library: true,
+      weather: false,
+      homework: true,
+      card: false,
+      memo: false,
+    });
     expect(normalizeHomeBarFixed({ library: 'x', homework: false })).toEqual({
       library: true,
       weather: true,
       homework: false,
+      card: false,
+      memo: false,
     });
     expect(normalizeHomeBarFixed(undefined)).toBeUndefined();
     expect(normalizeHomeBarFixed([])).toBeUndefined();
@@ -188,8 +196,8 @@ describe('天气 / 作业 / 图书馆开关', () => {
 
   it('存进去再读出来是同一份', async () => {
     const kv = memKV();
-    const saved = await saveHomeBarFixed({ library: false, weather: true, homework: false }, kv);
-    expect(saved).toEqual({ library: false, weather: true, homework: false });
+    const saved = await saveHomeBarFixed({ library: false, weather: true, homework: false, card: false, memo: false }, kv);
+    expect(saved).toEqual({ library: false, weather: true, homework: false, card: false, memo: false });
     expect(await loadHomeBarFixed(kv)).toEqual(saved);
   });
 });

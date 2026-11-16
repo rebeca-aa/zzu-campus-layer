@@ -214,12 +214,21 @@ export interface HomeBarFixed {
   library: boolean;
   weather: boolean;
   homework: boolean;
+  /** 推荐里额外加的两条：默认关，用户点了才出现 */
+  card: boolean;
+  memo: boolean;
 }
 
 export const HOME_BAR_FIXED_KEY = 'homeBarFixed';
 
 /** 默认都开着：全新安装 / 老版本没存过这份开关 */
-export const DEFAULT_HOME_BAR_FIXED: HomeBarFixed = { library: true, weather: true, homework: true };
+export const DEFAULT_HOME_BAR_FIXED: HomeBarFixed = {
+  library: true,
+  weather: true,
+  homework: true,
+  card: false,
+  memo: false,
+};
 
 /** 洗一遍开关：只认布尔值，缺的按默认开。 */
 export function normalizeHomeBarFixed(raw: unknown): HomeBarFixed | undefined {
@@ -230,6 +239,8 @@ export function normalizeHomeBarFixed(raw: unknown): HomeBarFixed | undefined {
     library: pick(o.library, DEFAULT_HOME_BAR_FIXED.library),
     weather: pick(o.weather, DEFAULT_HOME_BAR_FIXED.weather),
     homework: pick(o.homework, DEFAULT_HOME_BAR_FIXED.homework),
+    card: pick(o.card, DEFAULT_HOME_BAR_FIXED.card),
+    memo: pick(o.memo, DEFAULT_HOME_BAR_FIXED.memo),
   };
 }
 
