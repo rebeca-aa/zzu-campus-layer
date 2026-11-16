@@ -232,4 +232,30 @@ describe('parseHomeworkFromImages：读截图', () => {
     expect(out.drafts).toHaveLength(0);
     expect(out.note).toContain('没认出');
   });
+  it('第一次回空话、第二次给出 JSON 就用第二次的', async () => {
+    let n = 0;
+    const chat = async () => {
+      n += 1;
+      return n === 1 ? '好的，我看一下这张图。图里提到了高数作业。' : '{"items":[{"title":"高数习题","due":"2026-11-20T23:59:00+08:00"}]}';
+    };
+    const out = await parseHomeworkFromImages([IMG], { now: NOW, settings: VISION, chat });
+    expect(n).toBe(2);
+    expect(out.drafts).toHaveLength(1);
+    expect(out.drafts[0]?.title).toContain('高数');
+  });
+
+  it('两次都不给 JSON 就把模型原话带出来', async () => {
+    const chat = async () => '抱歉，这张图太模糊了，我看不清里面写的是什么。';
+    const out = await parseHomeworkFromImages([IMG], { now: NOW, settings: VISION, chat });
+    expect(out.drafts).toHaveLength(0);
+    expect(out.note).toContain('它先说');
+    expect(out.note).toContain('看不清');
+  });
+
+  it('模型回空内容时说清是空内容，不甩锅给截图', async () => {
+    const chat = async () => '';
+    const out = await parseHomeworkFromImages([IMG], { now: NOW, settings: VISION, chat });
+    expect(out.drafts).toHaveLength(0);
+    expect(out.note).toContain('空内容');
+  });
 });

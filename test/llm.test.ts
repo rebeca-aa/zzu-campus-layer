@@ -106,6 +106,21 @@ describe('llmChat', () => {
     expect(JSON.parse(String(calls[0]?.init.body))).toMatchObject({ model: 'DeepSeek-R1', stream: false });
   });
 
+  it('content 为空时退回 reasoning_content（推理模型只把话说在思考里）', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        new Response(
+          JSON.stringify({
+            choices: [{ message: { content: '', reasoning_content: '{"items":[{"title":"高数习题"}]}' } }],
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        ),
+      ),
+    );
+    const text = await llmChat(cfg, [{ role: 'user', content: 'hi' }]);
+    expect(text).toContain('高数习题');
+  });
   it('401 抛 LlmError 且标为鉴权失败，并把报错翻成人话', async () => {
     vi.stubGlobal(
       'fetch',

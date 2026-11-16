@@ -304,6 +304,9 @@ async function postChat(
         finish_reason?: string;
         message?: {
           content?: string | null;
+          /** 推理模型会把话写在思考字段里，content 可能是空的 */
+          reasoning_content?: string | null;
+          reasoning?: string | null;
           tool_calls?: Array<{ id?: string; function?: { name?: string; arguments?: string } }>;
         };
       }>;
@@ -317,7 +320,10 @@ async function postChat(
         argsRaw: c.function?.arguments ?? '{}',
       }));
     return {
-      content: stripThink(choice?.message?.content ?? ''),
+      // content 为空时退回思考字段：有的推理模型只把 JSON 写在 reasoning_content 里
+      content: stripThink(
+        choice?.message?.content || choice?.message?.reasoning_content || choice?.message?.reasoning || '',
+      ),
       toolCalls,
       finish: choice?.finish_reason ?? 'stop',
       ms: Date.now() - t0,

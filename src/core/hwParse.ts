@@ -328,26 +328,52 @@ export async function parseHomeworkFromImages(
         { provider: settings.provider, apiKey: settings.apiKey, model: settings.model },
         prompt,
         imgs,
-        { model, maxTokens: 1200, temperature: 0, timeoutMs: opts.timeoutMs ?? 45_000 },
+        { model, maxTokens: 2000, temperature: 0, timeoutMs: opts.timeoutMs ?? 45_000 },
       ));
 
-  let raw: string;
+  type Attempt = { raw: string; drafts: HomeworkDraft[]; guessed: number; empty: boolean };
+  const attempt = async (prompt: string): Promise<Attempt> => {
+    const raw = await chat(prompt, list, target.model);
+    const parsed = extractJson(raw);
+    const entries = Array.isArray(parsed) ? parsed : (parsed as { items?: unknown[] })?.items;
+    const { drafts, guessed } = normalizeLlmItems(parsed, now);
+    return { raw, drafts, guessed, empty: Array.isArray(entries) && entries.length === 0 };
+  };
+
+  let best: Attempt;
   try {
-    raw = await chat(imagePrompt(now), list, target.model);
+    best = await attempt(imagePrompt(now));
   } catch (err) {
     const msg = err instanceof LlmError ? err.message : (err as Error)?.message ?? String(err);
     return { drafts: [], via: 'llm', note: imageErrorHint(msg) };
   }
 
-  const parsed = extractJson(raw);
-  const entries = Array.isArray(parsed) ? parsed : (parsed as { items?: unknown[] })?.items;
-  if (Array.isArray(entries) && entries.length === 0) {
-    return { drafts: [], via: 'llm', note: '图里没认出要交的作业；字迹太糊的话，直接把文字粘进来更稳' };
+  /* 模型有时候先回一段解释、或者把 JSON 说在「思考」里。再要一次，这次只许 JSON。 */
+  if (!best.drafts.length) {
+    try {
+      const again = await attempt(
+        `${imagePrompt(now)}\n上一轮没有给出可用的 JSON。这次只输出一个 JSON 对象，不要解释、不要代码块。`,
+      );
+      if (again.drafts.length || (!best.raw.trim() && again.raw.trim())) best = again;
+    } catch {
+      /* 第二次失败就按第一次的结果说明原因 */
+    }
   }
-  const { drafts, guessed } = normalizeLlmItems(parsed, now);
-  if (!drafts.length) {
-    return { drafts: [], via: 'llm', note: '模型没从图里读出能用的作业，换个清楚点的截图再试' };
+
+  if (!best.drafts.length) {
+    if (best.empty) {
+      return { drafts: [], via: 'llm', note: '图里没认出要交的作业；字迹太糊的话，直接把文字粘进来更稳' };
+    }
+    const peek = oneLine(best.raw).slice(0, 60);
+    return {
+      drafts: [],
+      via: 'llm',
+      note: peek
+        ? `模型没读出能用的作业（它先说：${peek}…），换个清楚点的截图再试`
+        : '模型回了空内容：可能是推理模型把结果写在思考里了，去「我的 → 模型」换个识图模型再试',
+    };
   }
+  const { drafts, guessed } = best;
 
   const bits: string[] = [
     `${label} 的 ${target.model.split('/').pop() ?? target.model} 读的${list.length > 1 ? ` ${list.length} 张图` : '图'}`,
