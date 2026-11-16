@@ -549,10 +549,13 @@ function BarGlyph({ name }: { name: BarGlyphName }) {
     );
   }
   if (name === 'room') {
+    /* 空座位：椅背 + 坐面 + 两条腿 */
     return (
       <svg {...common}>
-        <path d="M5 20V5.5A1.5 1.5 0 0 1 6.5 4h11A1.5 1.5 0 0 1 19 5.5V20" />
-        <path d="M4 20h16M9 9h.01M15 14h.01" />
+        <path d="M7.2 4.6h9.6a1.6 1.6 0 0 1 1.6 1.6v6.2H5.6V6.2a1.6 1.6 0 0 1 1.6-1.6Z" />
+        <path d="M5.6 12.4h12.8" />
+        <path d="M7.2 12.4v6.6M16.8 12.4v6.6" />
+        <path d="M7.2 16.2h9.6" />
       </svg>
     );
   }
@@ -791,6 +794,9 @@ function HomeBars(props: {
             onClick={() => props.onPick(bar.text)}
             title={bar.text === bar.label ? undefined : bar.text}
           >
+            <span class="bar-ic">
+              <BarGlyph name="room" />
+            </span>
             <span class="bar-txt">
               <span class="bar-t">{bar.label}</span>
               <span class="bar-s">{bar.text}</span>
