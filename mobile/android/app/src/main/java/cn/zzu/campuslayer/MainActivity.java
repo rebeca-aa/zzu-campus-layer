@@ -5,9 +5,12 @@ import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.util.Base64;
 import android.view.ViewGroup;
 import android.webkit.CookieManager;
 import android.webkit.JavascriptInterface;
@@ -45,6 +48,19 @@ public class MainActivity extends Activity {
     private static final int REQ_FILE_CHOOSER = 3004;
     /** WebView 等我们回来的那次选图；同一时间只能有一份 */
     private ValueCallback<Uri[]> fileChooser = null;
+    /**
+     * 原生选图（作业页「读图」）：不再依赖 WebView 的 <input type="file">。
+     *
+     * 为什么绕开 WebView：选图器能打开、选完却什么也没发生——回调回来了，但 WebView
+     * 读不了那个 content:// URI（鸿蒙 / 部分 EMUI 上尤其明显），页面那边 change 事件
+     * 拿到的是空文件，于是「点了上传，之后没反应」。这里改成壳自己读图、压好、转成
+     * data URL 交给页面，页面拿到的就是能直接显示、能直接发出去的图。
+     */
+    private static final int REQ_PICK_IMAGES = 3005;
+    /** 这次选图要回给页面的 reqId */
+    private String pickReqId = null;
+    /** 一次最多回几张（页面那边也限 4） */
+    private int pickMax = 4;
 
     private WebView web;
 
@@ -329,6 +345,21 @@ public class MainActivity extends Activity {
                 }
             });
         }
+
+        /**
+         * 原生选图：页面调 pickImages(reqId, max)，壳弹系统选图器，读完图压成 JPEG 的
+         * data URL 再调 window.__pickImages(reqId, {"ok":true,"urls":[...]})。
+         *
+         * 用户取消 → {"ok":true,"urls":[]}；读不出来 → {"ok":false,"error":"…"}。
+         */
+        @JavascriptInterface
+        public void pickImages(final String reqId, final int max) {
+            runOnUiThread(new Runnable() {
+                @Override public void run() {
+                    openImagePicker(reqId, max);
+                }
+            });
+        }
     }
 
     /** 后台线程里的兜底：任何 Throwable 都变成一条给页面看的错误，绝不让进程退。 */
@@ -540,9 +571,143 @@ public class MainActivity extends Activity {
         startActivityForResult(new Intent(this, LibLoginActivity.class), REQ_LIB_LOGIN);
     }
 
+    /* ── 原生选图（作业页「读图」） ────────────────────────────────────────── */
+
+    /** 弹系统选图器；一次最多 pickMax 张。 */
+    private void openImagePicker(String reqId, int max) {
+        pickReqId = reqId;
+        pickMax = Math.max(1, Math.min(4, max));
+        Intent intent = new Intent(Intent.ACTION_GET_CONTENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType("image/*");
+        intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
+        try {
+            startActivityForResult(Intent.createChooser(intent, "选截图"), REQ_PICK_IMAGES);
+        } catch (Throwable e) {
+            pickReqId = null;
+            deliverImages(reqId, null, "没找到能选图的界面：装一个文件管理器再试");
+        }
+    }
+
+    /** 把选图结果读成 data URL（后台线程跑，读图是 IO）。 */
+    private void handlePickedImages(String reqId, Intent data, int max) {
+        if (data == null) {
+            deliverImages(reqId, null, null);
+            return;
+        }
+        final String rid = reqId;
+        final Intent src = data;
+        final int cap = max;
+        new Thread(() -> {
+            java.util.ArrayList<Uri> uris = new java.util.ArrayList<>();
+            try {
+                ClipData clip = src.getClipData();
+                if (clip != null) {
+                    for (int i = 0; i < clip.getItemCount() && uris.size() < cap; i++) {
+                        Uri u = clip.getItemAt(i).getUri();
+                        if (u != null) uris.add(u);
+                    }
+                }
+                if (uris.isEmpty() && src.getData() != null) uris.add(src.getData());
+            } catch (Throwable ignored) {
+            }
+            java.util.ArrayList<String> urls = new java.util.ArrayList<>();
+            for (Uri u : uris) {
+                String d = imageDataUrl(u, 1400);
+                if (d != null) urls.add(d);
+            }
+            if (urls.isEmpty()) {
+                deliverImages(rid, null, "读不出这张图：换成 JPG / PNG 再试（相机原图如果是 HEIC 就常见这个）");
+            } else {
+                deliverImages(rid, urls, null);
+            }
+        }, "pick-images").start();
+    }
+
+    /** content:// → JPEG data URL；失败返回 null。 */
+    private String imageDataUrl(Uri uri, int maxSide) {
+        try {
+            android.graphics.BitmapFactory.Options probe = new android.graphics.BitmapFactory.Options();
+            probe.inJustDecodeBounds = true;
+            try (java.io.InputStream in = getContentResolver().openInputStream(uri)) {
+                android.graphics.BitmapFactory.decodeStream(in, null, probe);
+            }
+            if (probe.outWidth <= 0 || probe.outHeight <= 0) return null;
+            int sample = 1;
+            while (Math.max(probe.outWidth, probe.outHeight) / (sample * 2) >= maxSide) sample *= 2;
+
+            android.graphics.BitmapFactory.Options opt = new android.graphics.BitmapFactory.Options();
+            opt.inSampleSize = sample;
+            Bitmap bmp;
+            try (java.io.InputStream in = getContentResolver().openInputStream(uri)) {
+                bmp = android.graphics.BitmapFactory.decodeStream(in, null, opt);
+            }
+            if (bmp == null) return null;
+
+            int w = bmp.getWidth();
+            int h = bmp.getHeight();
+            int side = Math.max(w, h);
+            if (side > maxSide) {
+                float k = maxSide / (float) side;
+                Bitmap scaled = Bitmap.createScaledBitmap(bmp, Math.max(1, Math.round(w * k)),
+                        Math.max(1, Math.round(h * k)), true);
+                if (scaled != bmp) bmp.recycle();
+                bmp = scaled;
+            }
+            java.io.ByteArrayOutputStream bos = new java.io.ByteArrayOutputStream();
+            bmp.compress(Bitmap.CompressFormat.JPEG, 82, bos);
+            bmp.recycle();
+            String b64 = Base64.encodeToString(bos.toByteArray(), Base64.NO_WRAP);
+            return "data:image/jpeg;base64," + b64;
+        } catch (Throwable e) {
+            return null;
+        }
+    }
+
+    /** 把选图结果交回页面：{"ok":…,"urls":[…]}（error 非空时 ok=false）。 */
+    private void deliverImages(String reqId, java.util.List<String> urls, String error) {
+        org.json.JSONObject box = new org.json.JSONObject();
+        try {
+            box.put("ok", error == null);
+            org.json.JSONArray arr = new org.json.JSONArray();
+            if (urls != null) {
+                for (String u : urls) arr.put(u);
+            }
+            box.put("urls", arr);
+            if (error != null) box.put("error", error);
+        } catch (Throwable ignored) {
+        }
+        final String payload = box.toString();
+        final String js = "window.__pickImages&&window.__pickImages("
+                + org.json.JSONObject.quote(reqId) + "," + org.json.JSONObject.quote(payload) + ")";
+        runOnUiThread(() -> {
+            if (error != null) {
+                Toast.makeText(MainActivity.this, error, Toast.LENGTH_LONG).show();
+            }
+            try {
+                if (web != null) web.evaluateJavascript(js, null);
+            } catch (Throwable ignored) {
+            }
+        });
+    }
+
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
+
+        /* 原生选图回来：读图 → 转 data URL → 交回页面（取消也要回，否则页面一直转圈） */
+        if (requestCode == REQ_PICK_IMAGES) {
+            String req = pickReqId;
+            int cap = pickMax;
+            pickReqId = null;
+            if (req == null) return;
+            if (resultCode != RESULT_OK) {
+                deliverImages(req, null, null);
+                return;
+            }
+            handlePickedImages(req, data, cap);
+            return;
+        }
 
         /* 选图回来：把结果交还给 WebView（取消也要回，否则页面会一直以为还在选） */
         if (requestCode == REQ_FILE_CHOOSER) {
