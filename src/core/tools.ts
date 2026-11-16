@@ -259,6 +259,7 @@ export const findFreeRoom: ToolDefinition<{
         rooms: scoped,
         ...(campus ? { campus } : {}),
         ...(place ? { place: place.label } : {}),
+        ...(!place && args.building ? { unknownPlace: args.building } : {}),
       },
     };
   },
