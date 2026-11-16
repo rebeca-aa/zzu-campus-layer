@@ -36,3 +36,6 @@ tmp/
 
 # 本地截图存档
 shots/
+
+# 例外的「公开私货」：安卓壳的固定签名钥匙 mobile/android/app/campus-layer.p12
+# 它是故意随仓库公开的（自签名、自己分发），不是泄露；见 build.gradle.kts 顶部说明。

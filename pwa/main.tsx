@@ -207,6 +207,8 @@ function App() {
   const [remote, setRemote] = useState<Release | null>(null);
   const [checking, setChecking] = useState(false);
   const [uptodate, setUptodate] = useState(false);
+  /* 壳（原生 APK）的版本号：只有安卓壳里才有；网页/浏览器里留空 */
+  const [shellVer, setShellVer] = useState('');
   /* 打开通知前在哪一栏，关掉时回那一栏（不是回 AI） */
   const [noticeFrom, setNoticeFrom] = useState<TabKey>('home');
   const swReg = useRef<ServiceWorkerRegistration | null>(null);
@@ -218,6 +220,20 @@ function App() {
   useEffect(() => setBooted(true), []);
   /* 在安卓壳里（壳注入了 CampusNotify）登录由原生菜单接管，不需要用户复制地址 */
   const inShell = typeof (window as unknown as { CampusNotify?: unknown }).CampusNotify !== 'undefined';
+
+  /* 壳的版本号：「检查更新」那行会写「网页 v0.2.127 · 壳 0.2.127」。
+     网页那套热更新只换前端，原生这块必须装新 APK，两个版本号分开看才不乱。 */
+  useEffect(() => {
+    const b = (window as unknown as { CampusNotify?: { shellInfo?: () => string } }).CampusNotify;
+    if (typeof b?.shellInfo !== 'function') return;
+    try {
+      const raw = b.shellInfo();
+      const info = raw ? (JSON.parse(raw) as { versionName?: string }) : null;
+      if (info?.versionName) setShellVer(info.versionName);
+    } catch {
+      /* 拿不到就当网页版，不显示壳版本 */
+    }
+  }, []);
 
 /* 自动续期：登录态过期/失效时先静默续一次；失败才把用户送到登录面板。
    续期由壳里的 LoginActivity(silent) 完成，结果经 window.__campusRenew('ok'|'fail') 回来。 */
@@ -1037,6 +1053,13 @@ const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
   const checkUpdate = useCallback(async () => {
     if (checking) return;
     setChecking(true);
+    /* 顺手让壳也查一下自己的新版（壳里才有这个桥；网页版是空调用） */
+    try {
+      const b = (window as unknown as { CampusNotify?: { checkShellUpdate?: () => void } }).CampusNotify;
+      b?.checkShellUpdate?.();
+    } catch {
+      /* 壳那边闹脾气不影响网页这边的检查 */
+    }
     try {
       const r = await fetchRelease();
       setRemote(r ?? null);
@@ -1391,6 +1414,7 @@ const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
           notifyClass={notifyClass}
           notifyNews={notifyNews}
           hasShell={inShell}
+          shellVersion={shellVer}
           renewBusy={renewBusy}
           onLogin={() => {
             setNavDir('fwd');

@@ -30,6 +30,50 @@ jobs:
         with:
           gradle-version: '8.7'
 
+      # Android 只允许「同一签名」的包覆盖安装。以前每次都用 CI 临时生成的 debug 钥匙，
+      # 于是每个 APK 签名都不一样，只能卸载重装，App 内的自动更新也就形同虚设。
+      # 这里第一次构建时生成一把固定的钥匙并提交进仓库，之后所有构建都用它：
+      # 新包可以直接盖掉旧包，登录态和设置都不动。
+      - name: 固定签名钥匙（没有就生成一次并提交）
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          KS=mobile/android/app/campus-layer.p12
+          if [ -f "$KS" ]; then
+            echo "已有固定签名钥匙，直接用"
+            exit 0
+          fi
+          keytool -genkeypair -v -keystore "$KS" -storetype PKCS12 \
+            -storepass campus-layer-sign -keypass campus-layer-sign \
+            -alias campus-layer -keyalg RSA -keysize 2048 -validity 10950 \
+            -dname "CN=campus-layer, OU=zzu, O=zzu, L=Zhengzhou, ST=Henan, C=CN" || exit 1
+
+          git config user.name "campus-layer-bot"
+          git config user.email "campus-layer-bot@users.noreply.github.com"
+          git add "$KS"
+          git commit -m "chore(android): 生成固定签名钥匙，让壳能原地升级 [skip ci]" || exit 1
+
+          # 推到 main：万一有人恰好同时推过，先 rebase 再来一次（最多三轮）
+          pushed=no
+          for i in 1 2 3; do
+            if git push origin HEAD:main; then pushed=yes; break; fi
+            git fetch origin main --deepen=50 || true
+            git rebase origin/main || { git rebase --abort || true; break; }
+            sleep 5
+          done
+
+          # 钥匙必须真的在远端，否则下一次构建又会生成另一把 → 包之间还是不能覆盖。
+          # 这种情况宁可让构建红，也不要悄悄发出一批装不上的包。
+          git fetch origin main --deepen=50 || true
+          if git cat-file -e "origin/main:$KS" 2>/dev/null; then
+            echo "钥匙已在 main 上（pushed=$pushed），之后的包都能互相覆盖"
+          else
+            echo "::error::固定签名钥匙没能提交到 main，这次构建出来的包会和之前的签名不一致"
+            # 至少把钥匙传出来，人工提交一次就能救回来（这把钥匙本来就是公开的）
+            GH_TOKEN="${GITHUB_TOKEN}" gh release upload build-logs "$KS" --clobber || true
+            exit 1
+          fi
+
       - name: assembleDebug
         working-directory: mobile/android
         run: gradle assembleDebug --no-daemon --stacktrace 2>&1 | tee /tmp/gradle-build.log
@@ -66,6 +110,17 @@ jobs:
           cp ./*.apk "${GITHUB_WORKSPACE}/campus-layer-${VER}.apk"
           cd "${GITHUB_WORKSPACE}"
           gh release view apk-latest >/dev/null 2>&1 || \
-            gh release create apk-latest --title "安卓壳（最新构建）" --notes "每次 push 到 main 自动更新。下载 campus-layer-debug.apk 安装；没签名证书，装之前要在系统里允许安装未知来源应用。" --target main
+            gh release create apk-latest --title "安卓壳（最新构建）" --notes "每次 push 到 main 自动更新。同一个固定签名，能直接覆盖安装（第一次从老包换过来要先卸载一次）。" --target main
           gh release upload apk-latest campus-layer-debug.apk --clobber
           gh release upload apk-latest "campus-layer-${VER}.apk" --clobber
+
+          # 壳的版本清单：App 每次启动读它，比本地 versionCode 大就提示装新版。
+          # 放在 APK 之后上传 —— 读到 shell.json 时对应的包一定已经在了，不会出现
+          # 「提示有新版、下下来还是旧签名」的尴尬窗口。
+          CODE=$(grep -oE 'versionCode = [0-9]+' mobile/android/app/build.gradle.kts | head -1 | grep -oE '[0-9]+')
+          printf '{"versionCode":%s,"versionName":"%s","apkUrl":"%s","publishedAt":"%s"}\n' \
+            "$CODE" "$VER" \
+            "https://github.com/rebeca-aa/zzu-campus-layer/releases/download/apk-latest/campus-layer-debug.apk" \
+            "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > shell.json
+          cat shell.json
+          gh release upload apk-latest shell.json --clobber

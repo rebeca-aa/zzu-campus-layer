@@ -145,6 +145,9 @@ public class MainActivity extends Activity {
                     "点页面里的「用学校账号登录」，登录一次就行——登录完会自动回来",
                     Toast.LENGTH_LONG).show();
         }
+
+        /* 壳自己的更新：网页那套只换前端，原生这块得装新 APK，这里开机静默查一次。 */
+        AppUpdater.maybeCheck(this);
     }
 
     /** 网页 → 壳：一批课前提醒（{at,title,body} 的数组）。JS 接口在各线程回调，切回主线程。 */
@@ -309,6 +312,22 @@ public class MainActivity extends Activity {
         @JavascriptInterface
         public void clearCrash() {
             CrashLog.clear(MainActivity.this);
+        }
+
+        /** 页面要显示「壳 v0.2.127」：返回 {"versionCode":112,"versionName":"0.2.127"}。 */
+        @JavascriptInterface
+        public String shellInfo() {
+            return AppUpdater.infoJson(MainActivity.this);
+        }
+
+        /** 页面上的「检查更新」：顺便把壳也查一遍（有新版就弹下载 / 安装）。 */
+        @JavascriptInterface
+        public void checkShellUpdate() {
+            runOnUiThread(new Runnable() {
+                @Override public void run() {
+                    AppUpdater.check(MainActivity.this, true);
+                }
+            });
         }
     }
 

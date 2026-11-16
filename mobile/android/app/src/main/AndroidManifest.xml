@@ -6,6 +6,8 @@
   <!-- 课前 30 分钟的提醒要准点；拿不到精确闹钟权限时退化成 setAndAllowWhileIdle -->
   <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
   <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+  <!-- 壳自己更新：下载好的 APK 要交给系统安装器覆盖安装 -->
+  <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
   <application
         android:icon="@mipmap/ic_launcher"
@@ -52,5 +54,12 @@
         <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
       </intent-filter>
     </receiver>
+
+    <!-- 只给系统安装器读下载好的 APK；网页永远拿不到这个 authority -->
+    <provider
+      android:name=".ApkProvider"
+      android:authorities="${applicationId}.apk"
+      android:exported="false"
+      android:grantUriPermissions="true" />
   </application>
 </manifest>

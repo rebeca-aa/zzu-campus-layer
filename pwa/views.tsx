@@ -1715,6 +1715,8 @@ export function MineView(props: {
   notifyClass: boolean;
   notifyNews: boolean;
   hasShell: boolean;
+  /** 安卓壳的版本号（网页版没有，留空）；和网页版本分开显示 */
+  shellVersion?: string;
   onLogin: () => void;
   onLibraryLogin: () => void;
   onRenew: () => void;
@@ -1843,7 +1845,7 @@ export function MineView(props: {
                   ? '正在检查…'
                   : props.updateVersion
                     ? `有新版本 v${props.updateVersion} · 点这里看改了什么`
-                    : `当前 v${props.version} · 点这里手动检查`}
+                    : `当前 v${props.version}${props.shellVersion ? ` · 壳 ${props.shellVersion}` : ''} · 点这里手动检查`}
               </span>
             </span>
             <span class="chev">›</span>
