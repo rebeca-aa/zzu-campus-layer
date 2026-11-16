@@ -2856,37 +2856,73 @@ html[data-theme='cream'] .hw-chip b.bad { color: #b4342f; }
   font-variant-numeric: tabular-nums;
 }
 
-.mp-row {
+.mp-labels {
   display: flex;
-  align-items: center;
-  gap: 6px;
+  gap: 4px;
+  padding: 0 2px;
 }
 
-.mp-cell {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
+.mp-labels span {
+  flex: 1 1 0;
+  text-align: center;
+  color: var(--dim);
+  font-size: 11px;
+}
+
+.mp-wheels {
+  position: relative;
+  display: flex;
+  gap: 4px;
+}
+
+/* 中间选中带：淡淡的主题色，不抢戏 */
+.mp-band {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 72px;
+  height: 36px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--accent) 9%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, transparent);
+  pointer-events: none;
+}
+
+.wheel-col {
   flex: 1 1 0;
   min-width: 0;
 }
 
-.mp-cell select {
-  flex: 1 1 auto;
-  min-width: 0;
-  width: 100%;
-  padding: 9px 6px;
-  border-radius: 9px;
-  border: 1px solid var(--hairline);
-  background: color-mix(in srgb, var(--panel) 94%, var(--text));
-  color: var(--text);
-  font: inherit;
-  font-size: 13px;
+.wheel {
+  height: 180px;
+  overflow-y: auto;
+  scroll-snap-type: y mandatory;
+  scrollbar-width: none;
+  -webkit-mask-image: linear-gradient(to bottom, transparent, #000 26%, #000 74%, transparent);
+  mask-image: linear-gradient(to bottom, transparent, #000 26%, #000 74%, transparent);
 }
 
-.mp-cell em {
+.wheel::-webkit-scrollbar {
+  display: none;
+}
+
+.wheel-pad {
+  height: 72px;
+}
+
+.wheel-item {
+  height: 36px;
+  line-height: 36px;
+  text-align: center;
+  scroll-snap-align: center;
   color: var(--dim);
-  font-size: 11px;
-  font-style: normal;
+  font-size: 15px;
+  font-variant-numeric: tabular-nums;
+}
+
+.wheel-item.on {
+  color: var(--text);
+  font-weight: 600;
 }
 
 .mp-acts {

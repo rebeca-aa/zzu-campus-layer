@@ -1582,6 +1582,56 @@ function defaultRemind(): Date {
   return d;
 }
 
+const PICK_ITEM_H = 36;
+
+/** 一列滚轮：滚动吸附到中间，松手后回调选中的值 */
+function WheelColumn({
+  values,
+  value,
+  onChange,
+  format,
+}: {
+  values: number[];
+  value: number;
+  onChange: (v: number) => void;
+  format?: (v: number) => string;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  const timer = useRef<number>(0);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const target = Math.max(0, values.indexOf(value)) * PICK_ITEM_H;
+    if (Math.abs(el.scrollTop - target) > 2) el.scrollTo({ top: target });
+  }, [value, values]);
+
+  const onScroll = () => {
+    window.clearTimeout(timer.current);
+    timer.current = window.setTimeout(() => {
+      const el = ref.current;
+      if (!el) return;
+      const i = Math.round(el.scrollTop / PICK_ITEM_H);
+      const v = values[Math.max(0, Math.min(values.length - 1, i))];
+      if (v !== undefined && v !== value) onChange(v);
+    }, 120);
+  };
+
+  return (
+    <div class="wheel-col">
+      <div class="wheel" ref={ref} onScroll={onScroll}>
+        <div class="wheel-pad" />
+        {values.map((v) => (
+          <div class={`wheel-item${v === value ? ' on' : ''}`} key={v}>
+            {format ? format(v) : v}
+          </div>
+        ))}
+        <div class="wheel-pad" />
+      </div>
+    </div>
+  );
+}
+
 function MemoPicker({
   value,
   onClose,
@@ -1596,20 +1646,17 @@ function MemoPicker({
   const [mo, setMo] = useState(init.getMonth() + 1);
   const [d, setD] = useState(init.getDate());
   const [h, setH] = useState(init.getHours());
-  const [mi, setMi] = useState(init.getMinutes());
-  const dayCount = new Date(y, mo, 0).getDate();
-  const day = Math.min(d, dayCount);
+  const [mi, setMi] = useState(init.getMinutes() - (init.getMinutes() % 5));
   const years = Array.from(
     new Set([...Array.from({ length: 4 }, (_, i) => new Date().getFullYear() + i), y]),
   ).sort((a, b) => a - b);
-  const preview = `${y}年${mo}月${day}日 周${'日一二三四五六'[new Date(y, mo - 1, day).getDay()]} ${String(h).padStart(2, '0')}:${String(mi).padStart(2, '0')}`;
+  const dayCount = new Date(y, mo, 0).getDate();
 
-  const cell = (node: ComponentChildren, suffix: string) => (
-    <span class="mp-cell">
-      {node}
-      <em>{suffix}</em>
-    </span>
-  );
+  useEffect(() => {
+    if (d > dayCount) setD(dayCount);
+  }, [d, dayCount]);
+
+  const preview = `${y}年${mo}月${Math.min(d, dayCount)}日 周${'日一二三四五六'[new Date(y, mo - 1, Math.min(d, dayCount)).getDay()]} ${String(h).padStart(2, '0')}:${String(mi).padStart(2, '0')}`;
 
   return createPortal(
     <div
@@ -1623,57 +1670,28 @@ function MemoPicker({
           <strong>提醒时间</strong>
           <span>{preview}</span>
         </div>
-        <div class="mp-row">
-          {cell(
-            <select value={y} onChange={(e) => setY(Number((e.target as HTMLSelectElement).value))}>
-              {years.map((v) => (
-                <option value={v} key={v}>
-                  {v}
-                </option>
-              ))}
-            </select>,
-            '年',
-          )}
-          {cell(
-            <select value={mo} onChange={(e) => setMo(Number((e.target as HTMLSelectElement).value))}>
-              {Array.from({ length: 12 }, (_, i) => i + 1).map((v) => (
-                <option value={v} key={v}>
-                  {v}
-                </option>
-              ))}
-            </select>,
-            '月',
-          )}
-          {cell(
-            <select value={day} onChange={(e) => setD(Number((e.target as HTMLSelectElement).value))}>
-              {Array.from({ length: dayCount }, (_, i) => i + 1).map((v) => (
-                <option value={v} key={v}>
-                  {v}
-                </option>
-              ))}
-            </select>,
-            '日',
-          )}
-          {cell(
-            <select value={h} onChange={(e) => setH(Number((e.target as HTMLSelectElement).value))}>
-              {Array.from({ length: 24 }, (_, i) => i).map((v) => (
-                <option value={v} key={v}>
-                  {String(v).padStart(2, '0')}
-                </option>
-              ))}
-            </select>,
-            '时',
-          )}
-          {cell(
-            <select value={mi} onChange={(e) => setMi(Number((e.target as HTMLSelectElement).value))}>
-              {Array.from({ length: 12 }, (_, i) => i * 5).map((v) => (
-                <option value={v} key={v}>
-                  {String(v).padStart(2, '0')}
-                </option>
-              ))}
-            </select>,
-            '分',
-          )}
+        <div class="mp-labels">
+          {['年', '月', '日', '时', '分'].map((t) => (
+            <span key={t}>{t}</span>
+          ))}
+        </div>
+        <div class="mp-wheels">
+          <span class="mp-band" aria-hidden="true" />
+          <WheelColumn values={years} value={y} onChange={setY} />
+          <WheelColumn values={Array.from({ length: 12 }, (_, i) => i + 1)} value={mo} onChange={setMo} />
+          <WheelColumn values={Array.from({ length: dayCount }, (_, i) => i + 1)} value={Math.min(d, dayCount)} onChange={setD} />
+          <WheelColumn
+            values={Array.from({ length: 24 }, (_, i) => i)}
+            value={h}
+            onChange={setH}
+            format={(v) => String(v).padStart(2, '0')}
+          />
+          <WheelColumn
+            values={Array.from({ length: 12 }, (_, i) => i * 5)}
+            value={mi}
+            onChange={setMi}
+            format={(v) => String(v).padStart(2, '0')}
+          />
         </div>
         <div class="mp-acts">
           <button class="ghost" onClick={() => onConfirm(null)}>
@@ -1683,7 +1701,10 @@ function MemoPicker({
           <button class="ghost" onClick={onClose}>
             取消
           </button>
-          <button class="primary" onClick={() => onConfirm(new Date(y, mo - 1, day, h, mi).getTime())}>
+          <button
+            class="primary"
+            onClick={() => onConfirm(new Date(y, mo - 1, Math.min(d, dayCount), h, mi).getTime())}
+          >
             确定
           </button>
         </div>
