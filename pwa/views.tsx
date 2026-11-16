@@ -5,7 +5,6 @@ import type { Course, Term } from '../src/core/types';
 import { currentWeekOf, diffDays, shanghaiHour, weekdayOf } from '../src/core/util';
 import { ageText, readCache, writeCache } from '../src/core/offline';
 import { dressAdvice, dressAdviceFor, loadWeather, rainReminder, type Weather, type WeatherIconName } from '../src/core/weather';
-import { addMemo, loadMemos, removeMemo, saveMemos, updateMemo, type Memo } from '../src/core/memo';
 import {
   dueText,
   homeworkState,
@@ -30,16 +29,15 @@ import {
   type HomeBar,
 } from '../src/core/homeBars';
 
-export type TabKey = 'home' | 'ai' | 'weather' | 'schedule' | 'memo' | 'mine';
+export type TabKey = 'home' | 'ai' | 'weather' | 'schedule' | 'mine';
 
 /** 一次工具调用的结果；失败时 ok=false，error 是给人看的一句话 */
 export type Caller = (name: string, args?: Record<string, unknown>) => Promise<{ ok: boolean; data?: any; error?: string }>;
 
-/* 底部三栏：课表不再单独占一格，改成点主页的课表卡片进去 */
+/* 底部三栏：课表点主页课表卡片进、天气点主页天气块进，都不占底栏 */
 const TABS: { key: TabKey; label: string }[] = [
   { key: 'home', label: '主页' },
   { key: 'ai', label: 'AI' },
-  { key: 'weather', label: '天气' },
   { key: 'mine', label: '我的' },
 ];
 
@@ -175,8 +173,8 @@ function TabIcon({ name }: { name: TabKey }) {
 }
 
 export function TabBar({ tab, onTab }: { tab: TabKey; onTab: (t: TabKey) => void }) {
-  /* 课表页不是底部入口，但它是从主页点进来的，所以高亮仍然停在「主页」 */
-  const shown: TabKey = tab === 'schedule' || tab === 'memo' ? 'home' : tab;
+  /* 课表 / 天气不是底部入口，但它们是从主页点进来的，所以高亮仍然停在「主页」 */
+  const shown: TabKey = tab === 'schedule' || tab === 'weather' ? 'home' : tab;
   return (
     <nav class="tabbar">
       {TABS.map((t) => (
@@ -238,8 +236,8 @@ export function HomeView(props: {
   onRefresh: () => void;
   /** 点课表卡片进本周课表页 */
   onOpenSchedule: () => void;
-  /** 点「备忘录」小块进备忘录页 */
-  onMemo: () => void;
+  /** 点「天气」小块进天气页 */
+  onWeather: () => void;
   /** 作业块：一行文案 + 逾期红点；点进作业页 */
   hw?: { text: string; dot?: boolean } | null;
   onHomework: () => void;
@@ -449,7 +447,7 @@ export function HomeView(props: {
           cardText={cardBal}
           cardBusy={cardBusy}
           onCardClick={loadCard}
-          onMemo={props.onMemo}
+          onWeather={props.onWeather}
           hwText={props.hw?.text ?? '还没作业'}
           hwDot={Boolean(props.hw?.dot)}
           onHomework={props.onHomework}
@@ -505,7 +503,7 @@ function draftOf(bars: HomeBar[]): BarDraft[] {
   });
 }
 
-type BarGlyphName = 'book' | 'room' | 'card' | 'memo' | 'chat' | 'hw';
+type BarGlyphName = 'book' | 'room' | 'card' | 'wx' | 'chat' | 'hw';
 
 function BarGlyph({ name }: { name: BarGlyphName }) {
   const common = {
@@ -552,11 +550,12 @@ function BarGlyph({ name }: { name: BarGlyphName }) {
       </svg>
     );
   }
-  if (name === 'memo') {
+  if (name === 'wx') {
     return (
       <svg {...common}>
-        <rect x="5" y="3.8" width="14" height="16.4" rx="2.2" />
-        <path d="M9 8h6M9 12h6M9 16h4" />
+        <circle cx="9" cy="9.4" r="3.2" />
+        <path d="M9 3.4v1.6M3.4 9.4H5M4.9 5.3l1.1 1.1M13.1 5.3l-1.1 1.1" />
+        <path d="M10.6 19.4h7.1a3.1 3.1 0 0 0 .2-6.2 4.3 4.3 0 0 0-8.2.8 2.7 2.7 0 0 0 .9 5.4Z" />
       </svg>
     );
   }
@@ -582,7 +581,8 @@ function HomeBars(props: {
   cardText: string;
   cardBusy: boolean;
   onCardClick: () => void;
-  onMemo: () => void;
+  /** 点天气块进天气页 */
+  onWeather: () => void;
   /** 作业：一行文字 + 逾期红点 */
   hwText: string;
   hwDot: boolean;
@@ -591,6 +591,22 @@ function HomeBars(props: {
   /* null = 设置窗关着；数组里是正在编辑的整份列表 */
   const [sheet, setSheet] = useState<BarDraft[] | null>(null);
   const [error, setError] = useState('');
+  /* 天气块的小字：读到缓存的实时天气就显示「晴 · 12°」，拉不到保持默认文案 */
+  const [wxLine, setWxLine] = useState('看看天气');
+  useEffect(() => {
+    let alive = true;
+    void loadWeather().then(
+      (wx) => {
+        if (alive) setWxLine(`${wx.now.label} · ${Math.round(wx.now.temp)}°`);
+      },
+      () => {
+        /* 失败不提示，进天气页能看到完整错误 */
+      },
+    );
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   const builtinBars = props.bars.filter(isBuiltinBar);
   const customBars = props.bars.filter((bar) => !isBuiltinBar(bar));
@@ -715,13 +731,13 @@ function HomeBars(props: {
             </button>
           ),
         )}
-        {/* 备忘录固定占第四格，和图书馆 / 空教室 / 校园卡拼成 2x2 */}
-        <button type="button" class="bar bar-tile-memo" onClick={props.onMemo}>
+        {/* 天气固定占第四格，和图书馆 / 空教室 / 校园卡拼成 2x2 */}
+        <button type="button" class="bar" onClick={props.onWeather}>
           <span class="bar-ic">
-            <BarGlyph name="memo" />
+            <BarGlyph name="wx" />
           </span>
-          <span class="bar-t">备忘录</span>
-          <span class="bar-s">记点东西</span>
+          <span class="bar-t">天气</span>
+          <span class="bar-s">{wxLine}</span>
         </button>
         {/* 作业横着占满一行：截止时间比数字重要，一行足够放「3 份待交 · 最近 11-16」 */}
         <button type="button" class={`bar bar-tile-hw${props.hwDot ? ' alert' : ''}`} onClick={props.onHomework}>
@@ -1540,481 +1556,6 @@ export function WeatherView({ today }: { today: string }) {
 
         <p class="hint">天气数据来自 Open-Meteo，30 分钟更新一次；断网时显示上次结果。</p>
       </main>
-    </>
-  );
-}
-
-/* ---------------- 备忘录 ---------------- */
-
-function memoTime(ts: number): string {
-  const d = new Date(ts);
-  const p = (n: number) => String(n).padStart(2, '0');
-  return `${p(d.getMonth() + 1)}/${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
-}
-
-const BellGlyph = ({ size = 16 }: { size?: number }) => (
-  <svg
-    viewBox="0 0 24 24"
-    width={size}
-    height={size}
-    fill="none"
-    stroke="currentColor"
-    stroke-width="1.7"
-    stroke-linecap="round"
-    stroke-linejoin="round"
-    aria-hidden="true"
-  >
-    <path d="M6.4 16.4V11a5.6 5.6 0 0 1 11.2 0v5.4l1.5 2.1H4.9z" />
-    <path d="M10 20.2a2.1 2.1 0 0 0 4 0" />
-  </svg>
-);
-
-function memoRemindText(ts: number): string {
-  const d = new Date(ts);
-  const p = (n: number) => String(n).padStart(2, '0');
-  return `${p(d.getMonth() + 1)}/${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
-}
-
-function defaultRemind(): Date {
-  const d = new Date();
-  d.setDate(d.getDate() + 1);
-  d.setHours(9, 0, 0, 0);
-  return d;
-}
-
-const PICK_ITEM_H = 36;
-
-/** 一列滚轮：滚动吸附到中间，松手后回调选中的值 */
-function WheelColumn({
-  values,
-  value,
-  onChange,
-  format,
-}: {
-  values: number[];
-  value: number;
-  onChange: (v: number) => void;
-  format?: (v: number) => string;
-}) {
-  const ref = useRef<HTMLDivElement>(null);
-  const timer = useRef<number>(0);
-
-  useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    const target = Math.max(0, values.indexOf(value)) * PICK_ITEM_H;
-    if (Math.abs(el.scrollTop - target) > 2) el.scrollTo({ top: target });
-  }, [value, values]);
-
-  const onScroll = () => {
-    window.clearTimeout(timer.current);
-    timer.current = window.setTimeout(() => {
-      const el = ref.current;
-      if (!el) return;
-      const i = Math.round(el.scrollTop / PICK_ITEM_H);
-      const v = values[Math.max(0, Math.min(values.length - 1, i))];
-      if (v !== undefined && v !== value) onChange(v);
-    }, 120);
-  };
-
-  return (
-    <div class="wheel-col">
-      <div class="wheel" ref={ref} onScroll={onScroll}>
-        <div class="wheel-pad" />
-        {values.map((v) => (
-          <div class={`wheel-item${v === value ? ' on' : ''}`} key={v}>
-            {format ? format(v) : v}
-          </div>
-        ))}
-        <div class="wheel-pad" />
-      </div>
-    </div>
-  );
-}
-
-function MemoPicker({
-  value,
-  onClose,
-  onConfirm,
-}: {
-  value: number | null;
-  onClose: () => void;
-  onConfirm: (ts: number | null) => void;
-}) {
-  const init = value ? new Date(value) : defaultRemind();
-  const [y, setY] = useState(init.getFullYear());
-  const [mo, setMo] = useState(init.getMonth() + 1);
-  const [d, setD] = useState(init.getDate());
-  const [h, setH] = useState(init.getHours());
-  const [mi, setMi] = useState(init.getMinutes() - (init.getMinutes() % 5));
-  const years = Array.from(
-    new Set([...Array.from({ length: 4 }, (_, i) => new Date().getFullYear() + i), y]),
-  ).sort((a, b) => a - b);
-  const dayCount = new Date(y, mo, 0).getDate();
-
-  useEffect(() => {
-    if (d > dayCount) setD(dayCount);
-  }, [d, dayCount]);
-
-  const preview = `${y}年${mo}月${Math.min(d, dayCount)}日 周${'日一二三四五六'[new Date(y, mo - 1, Math.min(d, dayCount)).getDay()]} ${String(h).padStart(2, '0')}:${String(mi).padStart(2, '0')}`;
-
-  return createPortal(
-    <div
-      class="memo-picker-mask"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
-    >
-      <div class="memo-picker" role="dialog" aria-modal="true" aria-label="提醒时间">
-        <div class="mp-head">
-          <strong>提醒时间</strong>
-          <span>{preview}</span>
-        </div>
-        <div class="mp-labels">
-          {['年', '月', '日', '时', '分'].map((t) => (
-            <span key={t}>{t}</span>
-          ))}
-        </div>
-        <div class="mp-wheels">
-          <span class="mp-band" aria-hidden="true" />
-          <WheelColumn values={years} value={y} onChange={setY} />
-          <WheelColumn values={Array.from({ length: 12 }, (_, i) => i + 1)} value={mo} onChange={setMo} />
-          <WheelColumn values={Array.from({ length: dayCount }, (_, i) => i + 1)} value={Math.min(d, dayCount)} onChange={setD} />
-          <WheelColumn
-            values={Array.from({ length: 24 }, (_, i) => i)}
-            value={h}
-            onChange={setH}
-            format={(v) => String(v).padStart(2, '0')}
-          />
-          <WheelColumn
-            values={Array.from({ length: 12 }, (_, i) => i * 5)}
-            value={mi}
-            onChange={setMi}
-            format={(v) => String(v).padStart(2, '0')}
-          />
-        </div>
-        <div class="mp-acts">
-          <button class="ghost" onClick={() => onConfirm(null)}>
-            清除
-          </button>
-          <span class="mp-space" />
-          <button class="ghost" onClick={onClose}>
-            取消
-          </button>
-          <button
-            class="primary"
-            onClick={() => onConfirm(new Date(y, mo - 1, Math.min(d, dayCount), h, mi).getTime())}
-          >
-            确定
-          </button>
-        </div>
-      </div>
-    </div>,
-    document.body,
-  );
-}
-
-export function MemoView({ onBack }: { onBack: () => void }) {
-  const [memos, setMemos] = useState<Memo[] | null>(null);
-  const [draft, setDraft] = useState('');
-  const [editing, setEditing] = useState<string | null>(null);
-  /* 删除不用 window.confirm：WebView 里它可能直接返回 false，改成点两下确认 */
-  const [confirmId, setConfirmId] = useState<string | null>(null);
-  /* 提醒：编辑/新增时选好的时间，保存时写进记录 */
-  const [remindAt, setRemindAt] = useState<number | null>(null);
-  const [picker, setPicker] = useState(false);
-  /* 多选：长按任意一条进入，右侧出圆圈，底部出删除条 */
-  const [selecting, setSelecting] = useState(false);
-  const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [confirmBulk, setConfirmBulk] = useState(false);
-  const press = useRef<{ id: string; x: number; y: number; timer: number } | null>(null);
-  const suppressClick = useRef(false);
-
-  useEffect(() => {
-    let alive = true;
-    void (async () => {
-      const list = await loadMemos();
-      if (alive) setMemos(list);
-    })();
-    return () => {
-      alive = false;
-    };
-  }, []);
-
-  /* 到点提醒：应用开着时每 30 秒看一次，同一条只提醒一次 */
-  useEffect(() => {
-    if (!memos) return;
-    const check = () => {
-      const now = Date.now();
-      for (const m of memos) {
-        if (!m.remindAt || m.remindAt > now) continue;
-        const key = `campus-layer:memoReminded:${m.id}`;
-        try {
-          if (localStorage.getItem(key)) continue;
-          localStorage.setItem(key, '1');
-        } catch {
-          continue;
-        }
-        const tip = `备忘录提醒：${m.text.slice(0, 80)}`;
-        try {
-          window.dispatchEvent(new CustomEvent('campus-note', { detail: tip }));
-        } catch {
-          /* 没有 toast 监听就算了 */
-        }
-        const bridge = (window as unknown as { CampusNotify?: { notify?: (t: string, b: string) => void } }).CampusNotify;
-        try {
-          bridge?.notify?.('备忘录提醒', m.text.slice(0, 120));
-        } catch {
-          /* 忽略 */
-        }
-      }
-    };
-    check();
-    const timer = setInterval(check, 30_000);
-    return () => clearInterval(timer);
-  }, [memos]);
-
-  const commit = (next: Memo[]) => {
-    setMemos(next);
-    void saveMemos(next);
-  };
-
-  const save = () => {
-    const text = draft.trim();
-    if (!text) return;
-    if (editing) {
-      commit(updateMemo(memos ?? [], editing, text, Date.now(), remindAt));
-      setEditing(null);
-    } else {
-      commit(addMemo(memos ?? [], text, Date.now(), remindAt));
-    }
-    setDraft('');
-    setRemindAt(null);
-  };
-
-  const startEdit = (m: Memo) => {
-    setConfirmId(null);
-    setEditing(m.id);
-    setDraft(m.text);
-    setRemindAt(m.remindAt ?? null);
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-  };
-
-  const enterSelect = (id: string) => {
-    suppressClick.current = true;
-    setSelecting(true);
-    setSelected(new Set([id]));
-    setConfirmBulk(false);
-    try {
-      navigator.vibrate?.(12);
-    } catch {
-      /* 不支持震动就算了 */
-    }
-  };
-
-  const exitSelect = () => {
-    setSelecting(false);
-    setSelected(new Set());
-    setConfirmBulk(false);
-  };
-
-  const toggleOne = (id: string) => {
-    setConfirmBulk(false);
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      if (next.size === 0) setSelecting(false);
-      return next;
-    });
-  };
-
-  const allSelected = (memos?.length ?? 0) > 0 && selected.size === memos?.length;
-  const toggleAll = () => {
-    setConfirmBulk(false);
-    setSelected(allSelected ? new Set() : new Set((memos ?? []).map((m) => m.id)));
-  };
-
-  const deleteSelected = () => {
-    if (!confirmBulk) {
-      setConfirmBulk(true);
-      return;
-    }
-    const ids = selected;
-    commit((memos ?? []).filter((m) => !ids.has(m.id)));
-    exitSelect();
-  };
-
-  const del = (m: Memo) => {
-    commit(removeMemo(memos ?? [], m.id));
-    setConfirmId(null);
-    if (editing === m.id) {
-      setEditing(null);
-      setDraft('');
-      setRemindAt(null);
-    }
-  };
-
-  return (
-    <>
-      <div class="subhead">
-        <button onClick={selecting ? exitSelect : onBack}>‹ {selecting ? '取消' : '返回'}</button>
-        <strong>{selecting ? `已选 ${selected.size} 条` : '备忘录'}</strong>
-        {!selecting && <span class="memo-count">{memos?.length ?? 0} 条</span>}
-      </div>
-      <main class="tabbody memo-page">
-        <section class="card memo-new">
-          <textarea
-            class="memo-input"
-            rows={3}
-            maxLength={1000}
-            placeholder="记点什么，比如：周五前交实验报告"
-            value={draft}
-            onInput={(e) => setDraft((e.target as HTMLTextAreaElement).value)}
-          />
-          <div class="memo-acts">
-            <span>{draft.length}/1000</span>
-            <button
-              type="button"
-              class={`memo-bell${remindAt ? ' on' : ''}`}
-              aria-label="设置提醒"
-              onClick={() => setPicker(true)}
-            >
-              <BellGlyph size={15} />
-              {remindAt ? <em>{memoRemindText(remindAt)}</em> : <em>提醒</em>}
-            </button>
-            {editing && (
-              <button
-                class="ghost"
-                onClick={() => {
-                  setEditing(null);
-                  setDraft('');
-                  setRemindAt(null);
-                }}
-              >
-                取消
-              </button>
-            )}
-            <button class="primary" disabled={!draft.trim()} onClick={save}>
-              {editing ? '保存修改' : '添加'}
-            </button>
-          </div>
-        </section>
-
-        {memos === null ? <p class="empty-line">正在读…</p> : null}
-        {memos && memos.length === 0 ? (
-          <p class="empty-line">还没有记录，上面写一条试试。</p>
-        ) : null}
-        {memos && memos.length > 0 ? (
-          <section class={`card memo-list${selecting ? ' selecting' : ''}`}>
-            {memos.map((m) => (
-              <div
-                class={`memo-item${editing === m.id ? ' on' : ''}${selected.has(m.id) ? ' sel' : ''}`}
-                key={m.id}
-                onPointerDown={(e) => {
-                  if (selecting) return;
-                  press.current = {
-                    id: m.id,
-                    x: e.clientX,
-                    y: e.clientY,
-                    timer: window.setTimeout(() => {
-                      enterSelect(m.id);
-                      press.current = null;
-                    }, 480),
-                  };
-                }}
-                onPointerMove={(e) => {
-                  if (!press.current) return;
-                  if (Math.abs(e.clientX - press.current.x) > 10 || Math.abs(e.clientY - press.current.y) > 10) {
-                    window.clearTimeout(press.current.timer);
-                    press.current = null;
-                  }
-                }}
-                onPointerUp={() => {
-                  if (!press.current) return;
-                  window.clearTimeout(press.current.timer);
-                  press.current = null;
-                }}
-                onPointerCancel={() => {
-                  if (!press.current) return;
-                  window.clearTimeout(press.current.timer);
-                  press.current = null;
-                }}
-                onClick={() => {
-                  if (suppressClick.current) {
-                    suppressClick.current = false;
-                    return;
-                  }
-                  if (selecting) toggleOne(m.id);
-                }}
-              >
-                <p class="memo-text">{m.text}</p>
-                <div class="memo-meta">
-                  {m.remindAt ? (
-                    <span class="memo-remind">
-                      <BellGlyph size={12} />
-                      {memoRemindText(m.remindAt)}
-                    </span>
-                  ) : null}
-                  <span class="memo-time">{memoTime(m.updatedAt)}</span>
-                  {selecting ? null : confirmId === m.id ? (
-                    <>
-                      <button type="button" class="ghost danger" onClick={() => del(m)}>
-                        确认删除
-                      </button>
-                      <button type="button" class="ghost" onClick={() => setConfirmId(null)}>
-                        取消
-                      </button>
-                    </>
-                  ) : (
-                    <>
-                      <button type="button" class="ghost" onClick={() => startEdit(m)}>
-                        编辑
-                      </button>
-                      <button type="button" class="ghost danger" onClick={() => setConfirmId(m.id)}>
-                        删除
-                      </button>
-                    </>
-                  )}
-                </div>
-                {selecting && (
-                  <span class={`memo-check${selected.has(m.id) ? ' on' : ''}`} aria-hidden="true">
-                    {selected.has(m.id) ? (
-                      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="m5 12.5 4.5 4.5L19 7.5" />
-                      </svg>
-                    ) : null}
-                  </span>
-                )}
-              </div>
-            ))}
-          </section>
-        ) : null}
-      </main>
-      {selecting && (
-        <div class="memo-bulk">
-          <button type="button" class="bulk-all" onClick={toggleAll}>
-            {allSelected ? '取消全选' : '全选'}
-          </button>
-          <span class="bulk-count">已选 {selected.size} 条</span>
-          <button type="button" class={`bulk-del${confirmBulk ? ' confirm' : ''}`} onClick={deleteSelected}>
-            <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <path d="M4.5 7h15M9 7V4.8h6V7M7 7l.8 12.2h8.4L17 7M10 10.5v6M14 10.5v6" />
-            </svg>
-            {confirmBulk ? `确认删除 ${selected.size} 条` : '删除'}
-          </button>
-        </div>
-      )}
-      {picker && (
-        <MemoPicker
-          value={remindAt}
-          onClose={() => setPicker(false)}
-          onConfirm={(ts) => {
-            setRemindAt(ts);
-            setPicker(false);
-          }}
-        />
-      )}
     </>
   );
 }

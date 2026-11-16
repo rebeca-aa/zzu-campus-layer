@@ -53,7 +53,7 @@ import {
 import { displayDayShanghai, msUntilMidnightShanghai, msUntilRollover, todayShanghai, weekOfDate } from '../src/core/util';
 import type { Term } from '../src/core/types';
 import { NoticeBoard } from '../src/ui/notice';
-import { HomeView, HomeworkView, HueLine, LineSlider, MemoView, MineView, ScheduleView, TabBar, WeatherView, type Caller, type TabKey } from './views';
+import { HomeView, HomeworkView, HueLine, LineSlider, MineView, ScheduleView, TabBar, WeatherView, type Caller, type TabKey } from './views';
 import {
   DEFAULT_SETTINGS,
   addHomework,
@@ -1324,9 +1324,9 @@ const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
               setNavDir('fwd');
               goTab('schedule');
             }}
-            onMemo={() => {
+            onWeather={() => {
               setNavDir('fwd');
-              goTab('memo');
+              goTab('weather');
             }}
             hw={hwTile}
             onHomework={() => openSub('homework')}
@@ -1347,12 +1347,6 @@ const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
                 }
               : {})}
           />
-        </div>
-      )}
-
-      {tab === 'memo' && (
-        <div class="page-live" key="memo">
-          <MemoView onBack={() => goTab('home')} />
         </div>
       )}
 
