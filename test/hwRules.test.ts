@@ -2,10 +2,16 @@ import { describe, expect, it } from 'vitest';
 import { detectShape, parseByStructure } from '../src/core/hwRules';
 import { parseDueAt } from '../src/core/homework';
 
-/** 固定「现在」：2026-11-13（周五）10:00 */
-const NOW = new Date('2026-11-13T10:00:00+08:00').getTime();
-const at = (m: string, d: string, h = '23', mi = '59') =>
-  new Date(`2026-${m}-${d}T${h}:${mi}:00+08:00`).getTime();
+/**
+ * 固定「现在」：2026-11-13（周五）10:00。
+ * 一律用「本地时间」构造期望值——实现里也是 setHours/setFullYear，
+ * 这样无论 CI 跑在 UTC 还是 +08:00，断言都成立。
+ */
+const NOW = new Date(2026, 10, 13, 10, 0, 0, 0).getTime();
+const at = (m: string, d: string, h = 23, mi = 59) =>
+  new Date(2026, Number(m) - 1, Number(d), h, mi, 0, 0).getTime();
+const atY = (y: number, m: string, d: string, h = 23, mi = 59) =>
+  new Date(y, Number(m) - 1, Number(d), h, mi, 0, 0).getTime();
 
 const S1 = `作业通知:
 微积分:2.1的课后习题（11.15）
@@ -38,7 +44,7 @@ describe('日期解析扩展', () => {
   });
   it('带年份 2027.1.14', () => {
     expect(parseDueAt('截止时间：2027.1.14', NOW)).toBe(
-      new Date('2027-01-14T23:59:00+08:00').getTime(),
+      atY(2027, '1', '14'),
     );
   });
   it('本周日晚上23:59', () => {
@@ -108,7 +114,7 @@ describe('样例 3：块型（课程在正文里）', () => {
     expect(r.drafts[0]).toMatchObject({
       course: '线性代数',
       title: '《行列式》单元测试',
-      dueAt: new Date('2027-01-14T23:59:00+08:00').getTime(),
+      dueAt: atY(2027, '1', '14'),
     });
   });
 });
