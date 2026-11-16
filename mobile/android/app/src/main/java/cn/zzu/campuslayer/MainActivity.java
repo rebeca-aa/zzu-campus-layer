@@ -575,6 +575,10 @@ public class MainActivity extends Activity {
 
     /** 弹系统选图器；一次最多 pickMax 张。 */
     private void openImagePicker(String reqId, int max) {
+        // 上一次还没回来又点了一次：先把旧的那次回掉，否则页面那边会一直等
+        if (pickReqId != null) {
+            deliverImages(pickReqId, null, "又点了一次「读图」，上一次的取消了");
+        }
         pickReqId = reqId;
         pickMax = Math.max(1, Math.min(4, max));
         Intent intent = new Intent(Intent.ACTION_GET_CONTENT);

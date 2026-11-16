@@ -12,7 +12,10 @@
  */
 
 export interface PickBridgeWindow {
-  CampusNotify?: { pickImages?: (reqId: string, max: number) => void };
+  CampusNotify?: {
+    pickImages?: (reqId: string, max: number) => void;
+    shellInfo?: () => string;
+  };
   __pickImages?: (reqId: string, payload: string) => void;
   __pickImageWaiters?: Record<string, (payload: string) => void>;
 }
@@ -27,6 +30,25 @@ function pickWindow(win?: PickBridgeWindow): PickBridgeWindow | undefined {
 export function canPickNatively(win?: PickBridgeWindow): boolean {
   const w = pickWindow(win);
   return !!w?.CampusNotify && typeof w.CampusNotify.pickImages === 'function';
+}
+
+/** 是不是在壳里（哪怕壳太旧、没有原生选图桥）。 */
+export function inShell(win?: PickBridgeWindow): boolean {
+  return !!pickWindow(win)?.CampusNotify;
+}
+
+/** 壳的版本号（读不到就是空串）。只用来把话说清楚，不参与任何判断逻辑。 */
+export function shellVersionName(win?: PickBridgeWindow): string {
+  const bridge = pickWindow(win)?.CampusNotify;
+  if (!bridge || typeof bridge.shellInfo !== 'function') return '';
+  try {
+    const raw = bridge.shellInfo();
+    if (!raw) return '';
+    const info = JSON.parse(raw) as { versionName?: unknown };
+    return typeof info.versionName === 'string' ? info.versionName : '';
+  } catch {
+    return '';
+  }
 }
 
 /**
@@ -51,11 +73,16 @@ export function pickImagesNative(max = 4, win?: PickBridgeWindow): Promise<strin
   };
 
   return new Promise<string[]>((resolve, reject) => {
-    // 用户在选图器里翻半天很正常，给足 3 分钟；超时也只是给个提示，不是死等
+    // 选图 + 读图 + 压图都在壳里做，正常几秒就回来。给 45 秒：既不催人，也别让页面
+    // 永远停在「读图中」（那看起来跟「没反应」一模一样）。
     const timer = setTimeout(() => {
       delete w.__pickImageWaiters![reqId];
-      reject(new Error('选图超时（3 分钟没回）'));
-    }, 180_000);
+      reject(
+        new Error(
+          '壳没把图送回来（45 秒）：可能这个壳版本还没有原生选图，也可能读图失败了。去「我的 → 检查更新」把壳升到最新再试',
+        ),
+      );
+    }, 45_000);
     w.__pickImageWaiters![reqId] = (payload: string) => {
       clearTimeout(timer);
       try {

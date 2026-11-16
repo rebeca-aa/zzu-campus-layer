@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { canPickNatively, pickImagesNative, type PickBridgeWindow } from '../src/core/pick';
+import { canPickNatively, inShell, pickImagesNative, shellVersionName, type PickBridgeWindow } from '../src/core/pick';
 
 /** 造一个假的壳：pickImages 被调用时立刻回一条结果 */
 function fakeShell(box: unknown): PickBridgeWindow {
@@ -42,5 +42,19 @@ describe('pickImagesNative', () => {
   it('只收 data:image/ 开头的东西（挡住壳给的脏数据）', async () => {
     const w = fakeShell({ ok: true, urls: ['javascript:alert(1)', 'data:image/jpeg;base64,OK'] });
     await expect(pickImagesNative(4, w)).resolves.toEqual(['data:image/jpeg;base64,OK']);
+  });
+});
+describe('壳环境判定', () => {
+  it('有 CampusNotify 但没 pickImages 也算在壳里（旧壳）', () => {
+    const old: PickBridgeWindow = { CampusNotify: {} };
+    expect(inShell(old)).toBe(true);
+    expect(canPickNatively(old)).toBe(false);
+    expect(inShell({} as PickBridgeWindow)).toBe(false);
+  });
+
+  it('壳版本号读得到就读，读不到给空串（不抛）', () => {
+    expect(shellVersionName({ CampusNotify: { shellInfo: () => '{"versionCode":118,"versionName":"0.2.133"}' } })).toBe('0.2.133');
+    expect(shellVersionName({ CampusNotify: { shellInfo: () => 'not json' } })).toBe('');
+    expect(shellVersionName({ CampusNotify: {} })).toBe('');
   });
 });

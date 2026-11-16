@@ -16,7 +16,7 @@ import {
   type HomeworkSettings,
 } from '../src/core/homework';
 import { parseHomeworkFromImages, parseHomeworkSmart } from '../src/core/hwParse';
-import { canPickNatively, pickImagesNative } from '../src/core/pick';
+import { canPickNatively, inShell, pickImagesNative, shellVersionName } from '../src/core/pick';
 import {
   DEFAULT_HOME_BAR_FIXED,
   MAX_HOME_BARS,
@@ -2065,9 +2065,25 @@ function toLocalInput(ms: number): string {
 /** 选中的图片先压到 1400px、JPEG 0.82 再发：手机原图 5MB 级，既慢又容易被服务商拒 */
 async function fileToDataUrl(file: File): Promise<string> {
   const raw = await new Promise<string>((res, rej) => {
+    // WebView 里读 content:// 有可能既不 onload 也不 onerror：加个超时，
+    // 否则页面会永远停在「读图中」（看起来就是点了没反应）。
+    const timer = setTimeout(
+      () => rej(new Error('这张图读不出来（壳拿不到文件）：更新壳再试，或者把截图另存成 JPG 再选')),
+      12_000,
+    );
     const fr = new FileReader();
-    fr.onload = () => res(String(fr.result ?? ''));
-    fr.onerror = () => rej(new Error('读不了这张图'));
+    fr.onload = () => {
+      clearTimeout(timer);
+      res(String(fr.result ?? ''));
+    };
+    fr.onerror = () => {
+      clearTimeout(timer);
+      rej(new Error('读不了这张图'));
+    };
+    fr.onabort = () => {
+      clearTimeout(timer);
+      rej(new Error('读这张图被打断了'));
+    };
     fr.readAsDataURL(file);
   });
   try {
@@ -2107,6 +2123,8 @@ export function HomeworkView(props: HomeworkViewProps) {
   const [imgBusy, setImgBusy] = useState(false);
   /** 壳里能原生选图就不用 <input type="file">（WebView 那条路在鸿蒙上读不出文件） */
   const [nativePick] = useState(() => canPickNatively());
+  /** 在壳里（哪怕壳太旧、没有原生选图桥） */
+  const [shellEnv] = useState(() => (typeof window === 'undefined' ? false : inShell()));
   const fileRef = useRef<HTMLInputElement | null>(null);
   const [manual, setManual] = useState({ title: '', course: '', due: '' });
   const [manualOpen, setManualOpen] = useState(false);
@@ -2143,7 +2161,14 @@ export function HomeworkView(props: HomeworkViewProps) {
       .filter((f) => f.type.startsWith('image/') || (!f.type && /\.(png|jpe?g|webp|gif|bmp|heic|heif)$/i.test(f.name)))
       .slice(0, 4);
     if (!picked.length && !nativePick) {
-      setParseNote('没拿到图片：这台环境只能用浏览器选图，换台设备或更新壳再试');
+      // 壳里但没有原生选图桥 = 壳太旧（0.2.132 才有）。WebView 的 input 那条路在这个壳上
+      // 读不出文件，会一直卡着，所以直接说清楚，别让它转圈。
+      const ver = inShell() ? shellVersionName() : '';
+      setParseNote(
+        inShell()
+          ? `这个壳${ver ? `（${ver}）` : ''}还没有原生选图：去「我的 → 检查更新」把壳升到 0.2.132 以上，再来点「读图」。`
+          : '没拿到图片：换一台设备，或把截图另存成 JPG 再试。',
+      );
       return;
     }
     setImgBusy(true);
@@ -2263,6 +2288,12 @@ export function HomeworkView(props: HomeworkViewProps) {
           {nativePick ? (
             <button class="ghost" type="button" disabled={imgBusy} onClick={() => void doImage(null)}>
               {imgBusy ? '读图中…' : '读图'}
+            </button>
+          ) : shellEnv ? (
+            // 壳里但壳太旧：没有原生选图桥。WebView 的 input 在这个壳上读不出文件，
+            // 点了只会卡在「读图中」，所以干脆不挂 input，直接告诉用户去升壳。
+            <button class="ghost" type="button" onClick={() => void doImage(null)}>
+              读图
             </button>
           ) : (
             <div class="hw-img-btn">
