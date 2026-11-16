@@ -1,17 +1,22 @@
 import { describe, expect, it } from 'vitest';
 import {
   CARD_HOME_BAR_ID,
+  DEFAULT_HOME_BAR_FIXED,
   HOME_BARS_KEY,
   HOME_BARS_VERSION,
+  HOME_BAR_FIXED_KEY,
   MAX_HOME_BARS,
   MAX_HOME_BAR_LABEL,
   MAX_HOME_BAR_TEXT,
   addHomeBar,
   createCardBar,
   isCardBar,
+  loadHomeBarFixed,
   loadHomeBars,
+  normalizeHomeBarFixed,
   normalizeHomeBars,
   removeHomeBar,
+  saveHomeBarFixed,
   saveHomeBars,
   setCardBarVisible,
   updateHomeBar,
@@ -161,5 +166,30 @@ describe('add / update / remove', () => {
   it('删一条只删指定的那条', () => {
     const items = list('a', 'b', 'c');
     expect(removeHomeBar(items, 'id-1').map((b) => b.text)).toEqual(['a', 'c']);
+  });
+});
+
+describe('天气 / 作业 / 图书馆开关', () => {
+  it('没存过、存坏了都当全开', async () => {
+    expect(await loadHomeBarFixed(memKV())).toEqual(DEFAULT_HOME_BAR_FIXED);
+    expect(await loadHomeBarFixed(memKV({ [HOME_BAR_FIXED_KEY]: 'broken' }))).toEqual(DEFAULT_HOME_BAR_FIXED);
+  });
+
+  it('只认布尔值，缺的字段按默认开', async () => {
+    expect(normalizeHomeBarFixed({ weather: false })).toEqual({ library: true, weather: false, homework: true });
+    expect(normalizeHomeBarFixed({ library: 'x', homework: false })).toEqual({
+      library: true,
+      weather: true,
+      homework: false,
+    });
+    expect(normalizeHomeBarFixed(undefined)).toBeUndefined();
+    expect(normalizeHomeBarFixed([])).toBeUndefined();
+  });
+
+  it('存进去再读出来是同一份', async () => {
+    const kv = memKV();
+    const saved = await saveHomeBarFixed({ library: false, weather: true, homework: false }, kv);
+    expect(saved).toEqual({ library: false, weather: true, homework: false });
+    expect(await loadHomeBarFixed(kv)).toEqual(saved);
   });
 });

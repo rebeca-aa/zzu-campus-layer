@@ -202,3 +202,63 @@ export function updateHomeBar(items: HomeBar[], id: string, patch: { label?: str
 export function removeHomeBar(items: HomeBar[], id: string): HomeBar[] {
   return items.filter((item) => item.id !== id);
 }
+
+/**
+ * 主页上不占 HomeBar 记录的几个固定入口的显隐开关。
+ *
+ * 图书馆是默认那条栏（文案还能改），天气、作业是前端固定画的两条，
+ * 三者都单独存一份开关，由设置窗顶部「显示」区控制。
+ */
+export interface HomeBarFixed {
+  /** 图书馆：栏本身留在列表里，只控制主页画不画 */
+  library: boolean;
+  weather: boolean;
+  homework: boolean;
+}
+
+export const HOME_BAR_FIXED_KEY = 'homeBarFixed';
+
+/** 默认都开着：全新安装 / 老版本没存过这份开关 */
+export const DEFAULT_HOME_BAR_FIXED: HomeBarFixed = { library: true, weather: true, homework: true };
+
+/** 洗一遍开关：只认布尔值，缺的按默认开。 */
+export function normalizeHomeBarFixed(raw: unknown): HomeBarFixed | undefined {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+  const o = raw as Record<string, unknown>;
+  const pick = (v: unknown, fallback: boolean) => (typeof v === 'boolean' ? v : fallback);
+  return {
+    library: pick(o.library, DEFAULT_HOME_BAR_FIXED.library),
+    weather: pick(o.weather, DEFAULT_HOME_BAR_FIXED.weather),
+    homework: pick(o.homework, DEFAULT_HOME_BAR_FIXED.homework),
+  };
+}
+
+/** 刚读/存过的那份：切页回来先按它画，免得条件栏闪一下 */
+let fixedCache: HomeBarFixed | null = null;
+
+export function cachedHomeBarFixed(): HomeBarFixed | null {
+  return fixedCache;
+}
+
+/** 读开关：没存过 / 存坏了 → 全开。 */
+export async function loadHomeBarFixed(kv: KV = getKV()): Promise<HomeBarFixed> {
+  try {
+    const fixed = normalizeHomeBarFixed(await kv.get<unknown>(HOME_BAR_FIXED_KEY)) ?? DEFAULT_HOME_BAR_FIXED;
+    fixedCache = fixed;
+    return fixed;
+  } catch {
+    return fixedCache ?? DEFAULT_HOME_BAR_FIXED;
+  }
+}
+
+/** 写开关：存不上也不挡界面，返回值就是真正生效的版本。 */
+export async function saveHomeBarFixed(next: HomeBarFixed, kv: KV = getKV()): Promise<HomeBarFixed> {
+  const fixed = normalizeHomeBarFixed(next) ?? DEFAULT_HOME_BAR_FIXED;
+  fixedCache = fixed;
+  try {
+    await kv.set(HOME_BAR_FIXED_KEY, fixed);
+  } catch {
+    /* 存不上：本次照常生效，下次进设置窗再存一遍 */
+  }
+  return fixed;
+}

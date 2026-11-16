@@ -17,16 +17,21 @@ import {
   type HomeworkSettings,
 } from '../src/core/homework';
 import {
+  DEFAULT_HOME_BAR_FIXED,
   MAX_HOME_BARS,
   MAX_HOME_BAR_LABEL,
   MAX_HOME_BAR_TEXT,
   addHomeBar,
+  cachedHomeBarFixed,
   createCardBar,
   isCardBar,
   isBuiltinBar,
+  loadHomeBarFixed,
+  saveHomeBarFixed,
   setCardBarVisible,
   updateHomeBar,
   type HomeBar,
+  type HomeBarFixed,
 } from '../src/core/homeBars';
 
 export type TabKey = 'home' | 'ai' | 'weather' | 'schedule' | 'mine';
@@ -493,6 +498,12 @@ interface BarDraft {
   text: string;
 }
 
+/** 设置窗打开时的草稿：栏列表 + 图书馆 / 天气 / 作业的显隐 */
+interface BarSheet {
+  rows: BarDraft[];
+  fixed: HomeBarFixed;
+}
+
 let draftSeq = 0;
 const newDraftKey = () => `d${(draftSeq += 1)}`;
 
@@ -573,6 +584,11 @@ function barGlyphOf(bar: HomeBar): BarGlyphName {
   return 'chat';
 }
 
+/** 出厂那条「图书馆」栏：显隐开关只认它，用户自己写到「图书馆」的栏不受影响 */
+function isLibraryBar(bar: HomeBar): boolean {
+  return isBuiltinBar(bar) && barGlyphOf(bar) === 'book';
+}
+
 function HomeBars(props: {
   bars: HomeBar[];
   onChange: (next: HomeBar[]) => void;
@@ -588,9 +604,20 @@ function HomeBars(props: {
   hwDot: boolean;
   onHomework: () => void;
 }) {
-  /* null = 设置窗关着；数组里是正在编辑的整份列表 */
-  const [sheet, setSheet] = useState<BarDraft[] | null>(null);
+  /* null = 设置窗关着；rows 是正在编辑的整份列表，fixed 是图书馆 / 天气 / 作业的显隐草稿 */
+  const [sheet, setSheet] = useState<BarSheet | null>(null);
   const [error, setError] = useState('');
+  /* 主页固定入口的显隐：先按上次读到的画，再后台补一次，切页回来不会闪 */
+  const [fixed, setFixed] = useState<HomeBarFixed>(() => cachedHomeBarFixed() ?? DEFAULT_HOME_BAR_FIXED);
+  useEffect(() => {
+    let alive = true;
+    void loadHomeBarFixed().then((next) => {
+      if (alive) setFixed(next);
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
   /* 天气条的小字：直接显示当日实时气温和天气（「晴 · 12°」）；拿不到就先空着，不留废话 */
   const [wxLine, setWxLine] = useState('');
   useEffect(() => {
@@ -615,15 +642,17 @@ function HomeBars(props: {
     };
   }, []);
 
-  const builtinBars = props.bars.filter(isBuiltinBar);
-  const customBars = props.bars.filter((bar) => !isBuiltinBar(bar));
-  /* 有 logo 的四条（图书馆 / 校园卡 / 天气 / 作业）置顶，空教室没有 logo 排后面 */
+  const builtinBars = (fixed.library ? props.bars : props.bars.filter((bar) => !isLibraryBar(bar))).filter(isBuiltinBar);
+  const customBars = (fixed.library ? props.bars : props.bars.filter((bar) => !isLibraryBar(bar))).filter(
+    (bar) => !isBuiltinBar(bar),
+  );
+  /* 有 logo 的先排：图书馆、校园卡；没有 logo 的空教室排后面 */
   const withLogo = builtinBars.filter((bar) => barGlyphOf(bar) !== 'room');
   const withoutLogo = builtinBars.filter((bar) => barGlyphOf(bar) === 'room');
 
   const openSheet = () => {
     setError('');
-    setSheet(draftOf(props.bars));
+    setSheet({ rows: draftOf(props.bars), fixed });
   };
 
   const closeSheet = () => {
@@ -632,38 +661,47 @@ function HomeBars(props: {
   };
 
   const patchRow = (key: string, patch: Partial<BarDraft>) => {
-    setSheet((rows) => (rows ? rows.map((row) => (row.key === key ? { ...row, ...patch } : row)) : rows));
+    setSheet((s) => (s ? { ...s, rows: s.rows.map((row) => (row.key === key ? { ...row, ...patch } : row)) } : s));
     setError('');
   };
 
   const addRow = () => {
-    setSheet((rows) => {
-      if (!rows || rows.filter((row) => row.kind !== 'card').length >= MAX_HOME_BARS) return rows;
-      return [...rows, { key: newDraftKey(), id: null, kind: 'chat', label: '', text: '' }];
+    setSheet((s) => {
+      if (!s || s.rows.filter((row) => row.kind !== 'card').length >= MAX_HOME_BARS) return s;
+      return { ...s, rows: [...s.rows, { key: newDraftKey(), id: null, kind: 'chat', label: '', text: '' }] };
     });
     setError('');
   };
 
   const dropRow = (key: string) => {
-    setSheet((rows) => (rows ? rows.filter((row) => row.key !== key) : rows));
+    setSheet((s) => (s ? { ...s, rows: s.rows.filter((row) => row.key !== key) } : s));
+    setError('');
+  };
+
+  /* 图书馆 / 天气 / 作业的开关：同样只改草稿，点保存才生效 */
+  const toggleFixed = (key: keyof HomeBarFixed) => {
+    setSheet((s) => (s ? { ...s, fixed: { ...s.fixed, [key]: !s.fixed[key] } } : s));
     setError('');
   };
 
   /* 校园卡开关：只在设置窗里改草稿，点保存才生效 */
   const toggleCard = () => {
-    setSheet((rows) => {
-      if (!rows) return rows;
-      if (rows.some((row) => row.kind === 'card')) return rows.filter((row) => row.kind !== 'card');
+    setSheet((s) => {
+      if (!s) return s;
+      if (s.rows.some((row) => row.kind === 'card')) return { ...s, rows: s.rows.filter((row) => row.kind !== 'card') };
       const card = createCardBar();
-      return [...rows, { key: card.id, id: card.id, kind: 'card' as const, label: card.label, text: '' }];
+      return {
+        ...s,
+        rows: [...s.rows, { key: card.id, id: card.id, kind: 'card' as const, label: card.label, text: '' }],
+      };
     });
     setError('');
   };
 
-  const chatRows = sheet ? sheet.filter((row) => row.kind !== 'card') : [];
-  const cardOn = Boolean(sheet?.some((row) => row.kind === 'card'));
+  const chatRows = sheet ? sheet.rows.filter((row) => row.kind !== 'card') : [];
+  const cardOn = Boolean(sheet?.rows.some((row) => row.kind === 'card'));
 
-  const saveAll = () => {
+  const saveAll = async () => {
     if (!sheet) return;
     try {
       /* 老栏按原顺序留下（一卡通归开关管），再逐条套用改动；新栏接在后面 */
@@ -680,6 +718,7 @@ function HomeBars(props: {
             : addHomeBar(next, text, label);
       }
       props.onChange(setCardBarVisible(next, cardOn));
+      setFixed(await saveHomeBarFixed(sheet.fixed));
       closeSheet();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -746,27 +785,31 @@ function HomeBars(props: {
             </button>
           ),
         )}
-        {/* 天气：小字直接是当日实时气温和天气 */}
-        <button type="button" class="bar" onClick={props.onWeather}>
-          <span class="bar-ic">
-            <BarGlyph name="wx" />
-          </span>
-          <span class="bar-txt">
-            <span class="bar-t">天气</span>
-            {wxLine ? <span class="bar-s">{wxLine}</span> : null}
-          </span>
-        </button>
+        {/* 天气：小字直接是当日实时气温和天气；显隐开关在设置窗里 */}
+        {fixed.weather ? (
+          <button type="button" class="bar" onClick={props.onWeather}>
+            <span class="bar-ic">
+              <BarGlyph name="wx" />
+            </span>
+            <span class="bar-txt">
+              <span class="bar-t">天气</span>
+              {wxLine ? <span class="bar-s">{wxLine}</span> : null}
+            </span>
+          </button>
+        ) : null}
         {/* 作业：红点表示有逾期 */}
-        <button type="button" class={`bar bar-tile-hw${props.hwDot ? ' alert' : ''}`} onClick={props.onHomework}>
-          {props.hwDot ? <span class="bar-dot" /> : null}
-          <span class="bar-ic">
-            <BarGlyph name="hw" />
-          </span>
-          <span class="bar-txt">
-            <span class="bar-t">作业</span>
-            <span class="bar-s">{props.hwText}</span>
-          </span>
-        </button>
+        {fixed.homework ? (
+          <button type="button" class={`bar bar-tile-hw${props.hwDot ? ' alert' : ''}`} onClick={props.onHomework}>
+            {props.hwDot ? <span class="bar-dot" /> : null}
+            <span class="bar-ic">
+              <BarGlyph name="hw" />
+            </span>
+            <span class="bar-txt">
+              <span class="bar-t">作业</span>
+              <span class="bar-s">{props.hwText}</span>
+            </span>
+          </button>
+        ) : null}
         {/* 空教室没有 logo，排在四条有 logo 的后面 */}
         {withoutLogo.map((bar) => (
           <button
@@ -797,8 +840,8 @@ function HomeBars(props: {
           </span>
         </button>
       ))}
-      {props.bars.length === 0 ? (
-        <p class="bars-empty">点右上角 + 加自定义栏，点一下就把话发给 AI。</p>
+      {builtinBars.length === 0 && customBars.length === 0 && !fixed.weather && !fixed.homework ? (
+        <p class="bars-empty">主页入口都藏起来了：点右上角 + 打开「显示」重新勾上。</p>
       ) : null}
       {sheet
         ? createPortal(
@@ -808,57 +851,122 @@ function HomeBars(props: {
                 if (e.target === e.currentTarget) closeSheet();
               }}
             >
-              <div class="bar-sheet-panel" role="dialog" aria-modal="true" aria-label="自定义栏设置">
+              <div class="bar-sheet-panel" role="dialog" aria-modal="true" aria-label="主页栏位设置">
                 <div class="bs-head">
-                  <strong>自定义栏</strong>
-                  <span class="bs-count">
-                    {chatRows.length} / {MAX_HOME_BARS}
-                  </span>
+                  <div class="bs-head-t">
+                    主页栏位
+                    <span class="bs-sub">开关控制显示哪些入口，改完点保存</span>
+                  </div>
+                  <button type="button" class="bs-x" aria-label="关闭" onClick={closeSheet}>
+                    ×
+                  </button>
                 </div>
-                <button
-                  type="button"
-                  class={`bs-switch${cardOn ? ' on' : ''}`}
-                  role="switch"
-                  aria-checked={cardOn}
-                  onClick={toggleCard}
-                >
-                  <span class="bs-switch-t">
-                    校园卡
-                    <em>只查余额，不进会话</em>
-                  </span>
-                  <span class="bs-switch-knob" aria-hidden="true" />
-                </button>
-                <div class="bs-list">
-                  {chatRows.map((row) => (
-                    <div class="bs-row" key={row.key}>
-                      <div class="bs-top">
-                        <input
-                          class="bs-label"
-                          value={row.label}
-                          maxLength={MAX_HOME_BAR_LABEL}
-                          placeholder="标题，留空就用正文开头"
-                          onInput={(e) => patchRow(row.key, { label: (e.target as HTMLInputElement).value })}
+                <div class="bs-body">
+                  <p class="bs-sec">显示</p>
+                  <div class="bs-switches">
+                    <button
+                      type="button"
+                      class={`bs-sw${sheet.fixed.library ? ' on' : ''}`}
+                      role="switch"
+                      aria-checked={sheet.fixed.library}
+                      onClick={() => toggleFixed('library')}
+                    >
+                      <span class="bs-sw-ic">
+                        <BarGlyph name="book" />
+                      </span>
+                      <span class="bs-sw-t">
+                        图书馆
+                        <em>一楼空座位图</em>
+                      </span>
+                      <span class="bs-knob" aria-hidden="true" />
+                    </button>
+                    <button
+                      type="button"
+                      class={`bs-sw${cardOn ? ' on' : ''}`}
+                      role="switch"
+                      aria-checked={cardOn}
+                      onClick={toggleCard}
+                    >
+                      <span class="bs-sw-ic">
+                        <BarGlyph name="card" />
+                      </span>
+                      <span class="bs-sw-t">
+                        校园卡
+                        <em>只查余额，不进会话</em>
+                      </span>
+                      <span class="bs-knob" aria-hidden="true" />
+                    </button>
+                    <button
+                      type="button"
+                      class={`bs-sw${sheet.fixed.weather ? ' on' : ''}`}
+                      role="switch"
+                      aria-checked={sheet.fixed.weather}
+                      onClick={() => toggleFixed('weather')}
+                    >
+                      <span class="bs-sw-ic">
+                        <BarGlyph name="wx" />
+                      </span>
+                      <span class="bs-sw-t">
+                        天气
+                        <em>当日实时气温</em>
+                      </span>
+                      <span class="bs-knob" aria-hidden="true" />
+                    </button>
+                    <button
+                      type="button"
+                      class={`bs-sw${sheet.fixed.homework ? ' on' : ''}`}
+                      role="switch"
+                      aria-checked={sheet.fixed.homework}
+                      onClick={() => toggleFixed('homework')}
+                    >
+                      <span class="bs-sw-ic">
+                        <BarGlyph name="hw" />
+                      </span>
+                      <span class="bs-sw-t">
+                        作业
+                        <em>截止提醒 + 逾期红点</em>
+                      </span>
+                      <span class="bs-knob" aria-hidden="true" />
+                    </button>
+                  </div>
+                  <p class="bs-sec">
+                    栏位
+                    <span class="bs-count">
+                      {chatRows.length} / {MAX_HOME_BARS}
+                    </span>
+                  </p>
+                  <div class="bs-list">
+                    {chatRows.map((row) => (
+                      <div class="bs-row" key={row.key}>
+                        <div class="bs-top">
+                          <input
+                            class="bs-label"
+                            value={row.label}
+                            maxLength={MAX_HOME_BAR_LABEL}
+                            placeholder="标题，留空就用正文开头"
+                            onInput={(e) => patchRow(row.key, { label: (e.target as HTMLInputElement).value })}
+                          />
+                          <button type="button" class="bs-del" aria-label="删掉这一条" onClick={() => dropRow(row.key)}>
+                            删除
+                          </button>
+                        </div>
+                        <textarea
+                          class="bs-text"
+                          value={row.text}
+                          rows={2}
+                          maxLength={MAX_HOME_BAR_TEXT}
+                          placeholder="点这条栏会把这句直接发给 AI"
+                          onInput={(e) => patchRow(row.key, { text: (e.target as HTMLTextAreaElement).value })}
                         />
-                        <button type="button" class="bs-del" aria-label="删掉这一条" onClick={() => dropRow(row.key)}>
-                          删除
-                        </button>
                       </div>
-                      <textarea
-                        class="bs-text"
-                        value={row.text}
-                        rows={2}
-                        maxLength={MAX_HOME_BAR_TEXT}
-                        placeholder="点这条栏会把这句直接发给 AI"
-                        onInput={(e) => patchRow(row.key, { text: (e.target as HTMLTextAreaElement).value })}
-                      />
-                    </div>
-                  ))}
-                  {chatRows.length === 0 ? <p class="bars-empty">还没有自定义栏，点下面「加一条」。</p> : null}
+                    ))}
+                    {chatRows.length === 0 ? <p class="bars-empty">还没有栏，点下面「加一条」。</p> : null}
+                  </div>
+                  {error ? <p class="hint warn">{error}</p> : null}
                 </div>
-                {error ? <p class="hint warn">{error}</p> : null}
                 <div class="bs-acts">
-                  <button type="button" class="ghost" onClick={addRow} disabled={chatRows.length >= MAX_HOME_BARS}>
-                    加一条
+                  <button type="button" class="bs-add" onClick={addRow} disabled={chatRows.length >= MAX_HOME_BARS}>
+                    + 加一条
                   </button>
                   <span class="bs-space" />
                   <button type="button" class="ghost" onClick={closeSheet}>
