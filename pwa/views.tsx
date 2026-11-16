@@ -1066,10 +1066,13 @@ export function ScheduleView(props: {
     let alive = true;
     setLoading(true);
     setErr('');
-    /* 先把上次的课表铺上：断网/接口慢时也不至于空白 */
+    /* 离线缓存按周存：第 9 周的缓存不能铺到第 10 周上 */
+    const cacheKey = `schedule:week:${week}`;
     void (async () => {
-      const cached = await readCache<Course[]>('schedule');
-      if (alive && cached) setCourses(cached.data);
+      const cached = await readCache<{ week: number; courses: Course[] }>(cacheKey);
+      if (!alive) return;
+      if (cached && cached.data.week === week) setCourses(cached.data.courses);
+      else setCourses([]);
     })();
     void (async () => {
       const askCurrent = !term && !weekSynced.current;
@@ -1081,6 +1084,7 @@ export function ScheduleView(props: {
         /* 服务端/工具算出的当前周：界面周次跟着它走，别停在默认的第 1 周 */
         if (askCurrent && typeof payload?.week === 'number' && payload.week > 0) {
           weekSynced.current = true;
+          void writeCache(`schedule:week:${payload.week}`, { week: payload.week, courses: list });
           if (payload.week !== week) {
             setWeek(payload.week);
             setLoading(false);
@@ -1089,16 +1093,16 @@ export function ScheduleView(props: {
         }
         setCourses(list);
         setAt(Date.now());
-        void writeCache('schedule', list);
+        void writeCache(cacheKey, { week, courses: list });
       } else {
-        /* 失败时别把缓存清掉，改成提示"这是上次的" */
-        const cached = await readCache<Course[]>('schedule');
-        if (cached) {
-          setCourses(cached.data);
-          setErr(`离线：课表是 ${ageText(cached.at)}的`);
+        /* 失败时只认这一周的缓存；没缓存就空着，别拿别的周凑数 */
+        const cached = await readCache<{ week: number; courses: Course[] }>(cacheKey);
+        if (cached && cached.data.week === week) {
+          setCourses(cached.data.courses);
+          setErr(`离线：第 ${week} 周课表是${ageText(cached.at)}的`);
         } else {
           setCourses([]);
-          setErr(res.error ?? '课表没读出来');
+          setErr(`离线：第 ${week} 周还没有缓存，联网后再看`);
         }
       }
       setLoading(false);
