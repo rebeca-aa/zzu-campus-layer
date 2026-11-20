@@ -1741,6 +1741,8 @@ export function MineView(props: {
   remindNext?: string;
   /** 安卓壳没拿到「闹钟和提醒」权限 */
   remindExactWarn?: boolean;
+  /** 去系统的「闹钟和提醒」授权页 */
+  onOpenExact?: () => void;
   onTestNotify?: () => void;
 }) {
   return (
@@ -1792,10 +1794,20 @@ export function MineView(props: {
             <span class="ic"><MineIcon name="alarm" /></span>
             <span class="tx">
               <span class="t">课前提醒</span>
-              <span class="s">每节课开课前 30 分钟各弹一条</span>
+              <span class="s">{remindSub(props.notifyClass, props.remindNext, props.remindExactWarn)}</span>
             </span>
             <span class={`sw${props.notifyClass ? ' on' : ''}`} />
           </button>
+          {props.remindExactWarn && props.onOpenExact ? (
+            <button type="button" class="mine-row mine-row-warn" onClick={props.onOpenExact}>
+              <span class="ic"><MineIcon name="alarm" /></span>
+              <span class="tx">
+                <span class="t">开启「闹钟和提醒」权限</span>
+                <span class="s">没开时系统会把提醒推迟，点这里去授权</span>
+              </span>
+              <span class="chev">›</span>
+            </button>
+          ) : null}
           <button class="mine-row" onClick={() => props.onToggleNews(!props.notifyNews)}>
             <span class="ic"><MineIcon name="bell" /></span>
             <span class="tx">

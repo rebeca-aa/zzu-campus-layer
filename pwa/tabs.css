@@ -2846,3 +2846,13 @@ html[data-theme='cream'] .hw-chip b.bad { color: #b4342f; }
   font-size: 11.5px;
   line-height: 1.5;
 }
+
+/* 权限没开时的提示行：暖色，不吓人但看得见 */
+.mine-row-warn .ic,
+.mine-row-warn .t {
+  color: #e0a060;
+}
+
+.mine-row-warn .s {
+  color: var(--dim);
+}

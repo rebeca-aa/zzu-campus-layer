@@ -626,6 +626,24 @@ const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
     }
   }, []);
 
+  useEffect(() => {
+    const check = () => {
+      const b = typeof window !== 'undefined' ? window.CampusNotify : undefined;
+      if (!b || typeof b.exactAllowed !== 'function') {
+        setRemindExactWarn(false);
+        return;
+      }
+      try {
+        setRemindExactWarn(!b.exactAllowed());
+      } catch {
+        setRemindExactWarn(false);
+      }
+    };
+    check();
+    document.addEventListener('visibilitychange', check);
+    return () => document.removeEventListener('visibilitychange', check);
+  }, []);
+
   const syncReminders = useCallback(async () => {
     if (!notifyClass) return;
     try {
@@ -633,11 +651,14 @@ const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
       if (!session.jwxtToken && !session.portalToken) return;
       const svc = new CampusService(session);
       const [courses, term] = await Promise.all([svc.courses(), svc.term().catch(() => undefined)]);
-      pushReminders([
+      const blocks = [
         ...buildReminderBlocks(courses, { termStart: term?.startDate }),
         /* 作业截止提醒跟课前提醒共用一套闹钟；已交的不会排 */
         ...homeworkReminders(hwRef.current.items, hwRef.current.settings),
-      ]);
+      ];
+      pushReminders(blocks);
+      /* 网页版没有系统闹钟：页面开着时用浏览器通知兜底 */
+      armBrowserNotifications(blocks);
     } catch {
       /* 提醒排不上不该影响聊天 */
     }
@@ -1415,6 +1436,11 @@ const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
           notifyNews={notifyNews}
           hasShell={inShell}
           shellVersion={shellVer}
+          remindExactWarn={remindExactWarn}
+          onOpenExact={() => {
+            const b = typeof window !== 'undefined' ? window.CampusNotify : undefined;
+            b?.openExactSettings?.();
+          }}
           renewBusy={renewBusy}
           onLogin={() => {
             setNavDir('fwd');

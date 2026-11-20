@@ -24,8 +24,8 @@ android {
     applicationId = "cn.zzu.campuslayer"
     minSdk = 24
     targetSdk = 34
-    versionCode = 124
-    versionName = "0.2.139"
+    versionCode = 125
+    versionName = "0.2.140"
   }
 
   signingConfigs {
