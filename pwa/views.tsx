@@ -272,23 +272,29 @@ export function HomeView(props: {
 
     /* 课表排在第一个、单独一条：它最快回来，回来就立刻渲染 */
     void (async () => {
-      /* 实时课表 8 秒没回来就用缓存；缓存已经先铺上了，这里只补一句提示 */
+      /* 3 秒没回来就先用缓存；连上以后实时数据仍然会替换缓存 */
+      const live = call('get_schedule', { day: rolled ? 'tomorrow' : 'today' });
+      const apply = (sched: { ok: boolean; data?: unknown; error?: string }) => {
+        if (!alive) return;
+        if (authFail(sched)) setNeedLogin(true);
+        if (sched.ok && sched.data) {
+          const payload = (sched.data as any).data ?? sched.data;
+          setCourses(Array.isArray(payload?.courses) ? payload.courses : []);
+          setWeek(typeof payload?.week === 'number' ? payload.week : null);
+        } else {
+          /* 拉不到就先留着缓存里的那节课，只提示一句，别把页面清成「今天没有课」 */
+          setErr(sched.error ?? '');
+        }
+      };
       const timeout = new Promise<never>((_, reject) => {
-        window.setTimeout(() => reject(new Error('timeout')), 8_000);
+        window.setTimeout(() => reject(new Error('timeout')), 3_000);
       });
-      const sched = await Promise.race([
-        call('get_schedule', { day: rolled ? 'tomorrow' : 'today' }),
-        timeout,
-      ]).catch(() => ({ ok: false as const, error: '实时课表 8 秒没回来，先用缓存' }));
-      if (!alive) return;
-      if (authFail(sched)) setNeedLogin(true);
-      if (sched.ok && sched.data) {
-        const payload = (sched.data as any).data ?? sched.data;
-        setCourses(Array.isArray(payload?.courses) ? payload.courses : []);
-        setWeek(typeof payload?.week === 'number' ? payload.week : null);
-      } else {
-        /* 拉不到就先留着缓存里的那节课，只提示一句，别把页面清成「今天没有课」 */
-        setErr(sched.error ?? '');
+      try {
+        apply(await Promise.race([live, timeout]));
+      } catch {
+        if (alive) setErr('实时课表 3 秒没回来，先用缓存');
+        /* 晚到的实时课表直接替换当前缓存和倒计时 */
+        live.then((r) => apply(r)).catch(() => {});
       }
     })();
 

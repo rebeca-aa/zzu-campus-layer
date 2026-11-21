@@ -118,7 +118,7 @@ const CAS_LOGIN_PORTAL =
 const TERM_CACHE_KEY = 'campus-layer:termCache';
 
 /** 学期信息落一份本地缓存：接口抖一下也不至于把课表页打回「第 1 周」。 */
-const COURSE_TIMEOUT_MS = 8_000;
+const COURSE_TIMEOUT_MS = 3_000;
 
 /** 超时就 reject，避免实时课表卡住提醒和主页 */
 function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
@@ -666,14 +666,16 @@ const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
   const syncReminders = useCallback(async () => {
     if (!notifyClass) return;
     const hwBlocks = homeworkReminders(hwRef.current.items, hwRef.current.settings);
-    /* 实时课表 8 秒没回来，就用上次缓存的整学期课表排提醒 */
+    /* 实时课表 3 秒没回来，就用上次缓存的整学期课表排提醒 */
     const cached = await readCache<{ courses: Course[]; termStart?: string }>('courses');
+    const blocksFor = (courses: Course[], termStart?: string) => [
+      ...buildReminderBlocks(courses, { termStart }),
+      /* 作业截止提醒跟课前提醒共用一套闹钟；已交的不会排 */
+      ...hwBlocks,
+    ];
     const fromCache = () => {
       if (!cached) return;
-      const blocks = [
-        ...buildReminderBlocks(cached.data.courses, { termStart: cached.data.termStart }),
-        ...hwBlocks,
-      ];
+      const blocks = blocksFor(cached.data.courses, cached.data.termStart);
       pushReminders(blocks);
       armBrowserNotifications(blocks);
     };
@@ -684,21 +686,22 @@ const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
         return;
       }
       const svc = new CampusService(session);
-      const [courses, term] = await withTimeout(
-        Promise.all([svc.courses(), svc.term().catch(() => undefined)]),
-        COURSE_TIMEOUT_MS,
-      );
-      void writeCache('courses', { courses, termStart: term?.startDate });
-      const blocks = [
-        ...buildReminderBlocks(courses, { termStart: term?.startDate }),
-        /* 作业截止提醒跟课前提醒共用一套闹钟；已交的不会排 */
-        ...hwBlocks,
-      ];
-      pushReminders(blocks);
-      /* 网页版没有系统闹钟：页面开着时用浏览器通知兜底 */
-      armBrowserNotifications(blocks);
+      const live = Promise.all([svc.courses(), svc.term().catch(() => undefined)]);
+      const applyLive = ([courses, term]: [Course[], Term | undefined]) => {
+        void writeCache('courses', { courses, termStart: term?.startDate });
+        const blocks = blocksFor(courses, term?.startDate);
+        pushReminders(blocks);
+        /* 网页版没有系统闹钟：页面开着时用浏览器通知兜底 */
+        armBrowserNotifications(blocks);
+      };
+      try {
+        applyLive(await withTimeout(live, COURSE_TIMEOUT_MS));
+      } catch {
+        /* 超时 / 接口抽风：先按缓存排，晚到的实时课表再覆盖 */
+        fromCache();
+        live.then(applyLive).catch(() => {});
+      }
     } catch {
-      /* 超时 / 接口抽风：退回缓存课表，别让提醒断档 */
       fromCache();
     }
   }, [notifyClass]);
