@@ -218,21 +218,55 @@ function readHomeCache(today: string): HomeCache | null {
   }
 }
 
+/** 课表类缓存留 30 天：离线一周以上也不至于没课表可看 */
+const SCHEDULE_CACHE_TTL = 30 * 24 * 3_600_000;
+
 /**
- * 从「整学期课表」缓存里取出某一天该上的课。
- * 主页按天缓存缺失（换天、20 点翻页、只同步过学期课表）时用它兜底。
+ * 取出某一天该上的课：先看整学期缓存，再看那一周（schedule:week:N）的缓存。
+ * 主页按天缓存缺失（换天、20 点翻页、只同步过周课表）时用它兜底。
  */
-async function readSemesterDay(date: string): Promise<{ courses: Course[]; week: number } | null> {
-  const cached = await readCache<{ courses: Course[]; termStart?: string }>('courses');
-  const termStart = cached?.data.termStart;
-  if (!cached || !termStart || !Array.isArray(cached.data.courses)) return null;
-  const week = weekOfDate(termStart, date);
+async function readSemesterDay(
+  date: string,
+  termStart?: string,
+): Promise<{ courses: Course[]; week: number } | null> {
+  const semester = await readCache<{ courses: Course[]; termStart?: string }>('courses', SCHEDULE_CACHE_TTL);
+  const start = termStart ?? semester?.data.termStart;
+  if (!start) return null;
+  const week = weekOfDate(start, date);
   if (!week) return null;
   const dow = weekdayOf(date);
-  const list = cached.data.courses.filter(
-    (c) => c.weekday === dow && (c.weeks && c.weeks.length ? c.weeks.includes(week) : true),
+  const pick = (courses: Course[]) =>
+    courses.filter((c) => c.weekday === dow && (c.weeks && c.weeks.length ? c.weeks.includes(week) : true));
+
+  if (semester && Array.isArray(semester.data.courses)) {
+    return { courses: pick(semester.data.courses), week };
+  }
+  const weekCache = await readCache<{ week: number; courses: Course[] }>(
+    `schedule:week:${week}`,
+    SCHEDULE_CACHE_TTL,
   );
-  return { courses: list, week };
+  if (weekCache && Array.isArray(weekCache.data.courses)) {
+    return { courses: pick(weekCache.data.courses), week };
+  }
+  return null;
+}
+
+/**
+ * 实时课表回来后，把这一天的课合并进整学期缓存：
+ * 以后离线换天时，即使没同步过整学期课表，也能从合并后的缓存里取到。
+ */
+async function mergeSemesterCache(
+  dayCourses: Course[],
+  date: string,
+  week: number | undefined,
+  termStart: string | undefined,
+): Promise<void> {
+  if (!termStart || !week) return;
+  const cached = await readCache<{ courses: Course[]; termStart?: string }>('courses', SCHEDULE_CACHE_TTL);
+  const base = cached && Array.isArray(cached.data.courses) ? cached.data.courses : [];
+  const names = new Set(dayCourses.map((c) => c.key ?? c.name));
+  const kept = base.filter((c) => !names.has(c.key ?? c.name) && c.weekday !== weekdayOf(date));
+  void writeCache('courses', { courses: [...kept, ...dayCourses], termStart });
 }
 
 function writeHomeCache(today: string, data: HomeCache): void {
@@ -250,6 +284,8 @@ function writeHomeCache(today: string, data: HomeCache): void {
 
 export function HomeView(props: {
   today: string;
+  /** 学期首周周一（缓存课表按日期推周次用） */
+  termStart?: string;
   /** 20 点后首页翻到「明天」：标题、文案、课表都按明天来 */
   rolled: boolean;
   call: Caller;
@@ -281,6 +317,8 @@ export function HomeView(props: {
   const [week, setWeek] = useState<number | null>(cached?.week ?? null);
   const [err, setErr] = useState('');
   const [needLogin, setNeedLogin] = useState(false);
+  /* 当前显示的是缓存课表：不再弹登录/超时提示，安静显示 */
+  const [fromCache, setFromCache] = useState(Boolean(cached));
 
   useEffect(() => {
     let alive = true;
@@ -290,10 +328,11 @@ export function HomeView(props: {
     /* 当天缓存缺失时，先用学期缓存里这一天的课把主页铺上 */
     if (!cached) {
       void (async () => {
-        const fb = await readSemesterDay(props.today);
+        const fb = await readSemesterDay(props.today, props.termStart);
         if (!alive || !fb) return;
         setCourses(fb.courses);
         setWeek(fb.week);
+        setFromCache(true);
       })();
     }
 
@@ -306,8 +345,12 @@ export function HomeView(props: {
         if (authFail(sched)) setNeedLogin(true);
         if (sched.ok && sched.data) {
           const payload = (sched.data as any).data ?? sched.data;
-          setCourses(Array.isArray(payload?.courses) ? payload.courses : []);
+          const list = Array.isArray(payload?.courses) ? payload.courses : [];
+          const wk = typeof payload?.week === 'number' ? payload.week : undefined;
+          setCourses(list);
           setWeek(typeof payload?.week === 'number' ? payload.week : null);
+          setFromCache(false);
+          void mergeSemesterCache(list, props.today, wk, props.termStart);
         } else {
           /* 拉不到就先留着缓存里的那节课，只提示一句，别把页面清成「今天没有课」 */
           setErr(sched.error ?? '');
@@ -319,13 +362,13 @@ export function HomeView(props: {
       try {
         apply(await Promise.race([live, timeout]));
       } catch {
-        if (alive) setErr('实时课表 3 秒没回来，先用缓存');
-        /* 当天缓存没有就退回学期缓存里的这一天 */
+        /* 不弹提示：直接安静地用缓存把这一天的课表铺上 */
         void (async () => {
-          const fb = await readSemesterDay(props.today);
+          const fb = await readSemesterDay(props.today, props.termStart);
           if (alive && fb) {
             setCourses(fb.courses);
             setWeek(fb.week);
+            setFromCache(true);
           }
         })();
         /* 晚到的实时课表直接替换当前缓存和倒计时 */
@@ -436,11 +479,11 @@ export function HomeView(props: {
               </span>
             </span>
           </div>
-          {needLogin && list.length === 0 ? (
+          {needLogin && list.length === 0 && !fromCache ? (
             <p class="empty-line">还没登录：去「我的 → 登录」登录一次，这里会显示{rolled ? '明天' : '今天'}的课。</p>
           ) : (
             <>
-              {err && (
+              {err && !fromCache && (
                 <p class="empty-line">
                   {err}
                   <button
@@ -454,8 +497,10 @@ export function HomeView(props: {
                   </button>
                 </p>
               )}
-              {!err && courses === null && <p class="empty-line">正在读课表…</p>}
-              {!err && courses !== null && list.length === 0 && <p class="empty-line">{rolled ? '明天没有课，安心休息。' : '今天没有课，好好休息。'}</p>}
+              {!err && !fromCache && courses === null && <p class="empty-line">正在读课表…</p>}
+              {!err && !fromCache && courses !== null && list.length === 0 && (
+                <p class="empty-line">{rolled ? '明天没有课，安心休息。' : '今天没有课，好好休息。'}</p>
+              )}
             </>
           )}
           <div class="lessons">
@@ -1274,7 +1319,7 @@ export function ScheduleView(props: {
     /* 离线缓存按周存：第 9 周的缓存不能铺到第 10 周上 */
     const cacheKey = `schedule:week:${week}`;
     void (async () => {
-      const cached = await readCache<{ week: number; courses: Course[] }>(cacheKey);
+      const cached = await readCache<{ week: number; courses: Course[] }>(cacheKey, SCHEDULE_CACHE_TTL);
       if (!alive) return;
       if (cached && cached.data.week === week) setCourses(cached.data.courses);
       else setCourses([]);
@@ -1301,7 +1346,7 @@ export function ScheduleView(props: {
         void writeCache(cacheKey, { week, courses: list });
       } else {
         /* 失败时只认这一周的缓存；没缓存就空着，别拿别的周凑数 */
-        const cached = await readCache<{ week: number; courses: Course[] }>(cacheKey);
+        const cached = await readCache<{ week: number; courses: Course[] }>(cacheKey, SCHEDULE_CACHE_TTL);
         if (cached && cached.data.week === week) {
           setCourses(cached.data.courses);
           setErr(`离线：第 ${week} 周课表是${ageText(cached.at)}的`);

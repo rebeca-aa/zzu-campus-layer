@@ -667,7 +667,7 @@ const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
     if (!notifyClass) return;
     const hwBlocks = homeworkReminders(hwRef.current.items, hwRef.current.settings);
     /* 实时课表 3 秒没回来，就用上次缓存的整学期课表排提醒 */
-    const cached = await readCache<{ courses: Course[]; termStart?: string }>('courses');
+    const cached = await readCache<{ courses: Course[]; termStart?: string }>('courses', 30 * 24 * 3_600_000);
     const blocksFor = (courses: Course[], termStart?: string) => [
       ...buildReminderBlocks(courses, { termStart }),
       /* 作业截止提醒跟课前提醒共用一套闹钟；已交的不会排 */
@@ -1400,6 +1400,7 @@ const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
         <div class="page-live" key="home">
           <HomeView
             today={homeDay.date}
+            termStart={term?.startDate ?? readCachedTerm()?.startDate}
             rolled={homeDay.rolled}
             call={call}
             refreshKey={homeRefresh}
