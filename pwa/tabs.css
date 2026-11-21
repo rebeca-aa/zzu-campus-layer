@@ -2887,3 +2887,14 @@ header .termline .back svg {
   display: inline-block;
   vertical-align: -3px;
 }
+
+/* 「离线课表」小标：紧跟在今日/明日课表后面，淡到不打扰 */
+.offline-tag {
+  margin-left: 6px;
+  color: var(--dim);
+  font-size: 10.5px;
+  font-style: normal;
+  font-weight: 400;
+  letter-spacing: 0.04em;
+  opacity: 0.7;
+}

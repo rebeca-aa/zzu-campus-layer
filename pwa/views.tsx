@@ -471,7 +471,10 @@ export function HomeView(props: {
           }}
         >
           <div class="cardhead">
-            <strong>{rolled ? '明日课表' : '今日课表'}</strong>
+            <strong>
+              {rolled ? '明日课表' : '今日课表'}
+              {fromCache ? <em class="offline-tag">离线课表</em> : null}
+            </strong>
             <span class="ch-right">
               本周课表
               <span class="chev" aria-hidden="true">
