@@ -2,7 +2,7 @@ import type { ComponentChildren } from 'preact';
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { createPortal } from 'preact/compat';
 import type { Course, Term } from '../src/core/types';
-import { currentWeekOf, diffDays, shanghaiHour, weekdayOf } from '../src/core/util';
+import { currentWeekOf, diffDays, shanghaiHour, weekdayOf, weekOfDate } from '../src/core/util';
 import { ageText, readCache, writeCache } from '../src/core/offline';
 import { dressAdvice, dressAdviceFor, loadWeather, rainReminder, type Weather, type WeatherIconName } from '../src/core/weather';
 import {
@@ -218,6 +218,23 @@ function readHomeCache(today: string): HomeCache | null {
   }
 }
 
+/**
+ * 从「整学期课表」缓存里取出某一天该上的课。
+ * 主页按天缓存缺失（换天、20 点翻页、只同步过学期课表）时用它兜底。
+ */
+async function readSemesterDay(date: string): Promise<{ courses: Course[]; week: number } | null> {
+  const cached = await readCache<{ courses: Course[]; termStart?: string }>('courses');
+  const termStart = cached?.data.termStart;
+  if (!cached || !termStart || !Array.isArray(cached.data.courses)) return null;
+  const week = weekOfDate(termStart, date);
+  if (!week) return null;
+  const dow = weekdayOf(date);
+  const list = cached.data.courses.filter(
+    (c) => c.weekday === dow && (c.weeks && c.weeks.length ? c.weeks.includes(week) : true),
+  );
+  return { courses: list, week };
+}
+
 function writeHomeCache(today: string, data: HomeCache): void {
   try {
     localStorage.setItem(homeCacheKey(today), JSON.stringify(data));
@@ -270,6 +287,16 @@ export function HomeView(props: {
     setErr('');
     const authFail = (r: { ok: boolean; error?: string }) => !r.ok && /登录/.test(r.error ?? '');
 
+    /* 当天缓存缺失时，先用学期缓存里这一天的课把主页铺上 */
+    if (!cached) {
+      void (async () => {
+        const fb = await readSemesterDay(props.today);
+        if (!alive || !fb) return;
+        setCourses(fb.courses);
+        setWeek(fb.week);
+      })();
+    }
+
     /* 课表排在第一个、单独一条：它最快回来，回来就立刻渲染 */
     void (async () => {
       /* 3 秒没回来就先用缓存；连上以后实时数据仍然会替换缓存 */
@@ -293,6 +320,14 @@ export function HomeView(props: {
         apply(await Promise.race([live, timeout]));
       } catch {
         if (alive) setErr('实时课表 3 秒没回来，先用缓存');
+        /* 当天缓存没有就退回学期缓存里的这一天 */
+        void (async () => {
+          const fb = await readSemesterDay(props.today);
+          if (alive && fb) {
+            setCourses(fb.courses);
+            setWeek(fb.week);
+          }
+        })();
         /* 晚到的实时课表直接替换当前缓存和倒计时 */
         live.then((r) => apply(r)).catch(() => {});
       }
