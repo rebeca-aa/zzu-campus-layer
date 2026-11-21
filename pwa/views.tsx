@@ -1281,6 +1281,7 @@ export function ScheduleView(props: {
   const [courses, setCourses] = useState<Course[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState('');
+  const [fromCache, setFromCache] = useState(false);
   const colorMap = useMemo(() => assignColors(courses), [courses]);
   /* 每门课的色块：浅/深跟着主题，字色按亮度选，保证对比度 */
   const paintOf = useMemo(() => {
@@ -1324,41 +1325,71 @@ export function ScheduleView(props: {
     void (async () => {
       const cached = await readCache<{ week: number; courses: Course[] }>(cacheKey, SCHEDULE_CACHE_TTL);
       if (!alive) return;
-      if (cached && cached.data.week === week) setCourses(cached.data.courses);
-      else setCourses([]);
+      if (cached && cached.data.week === week) {
+        setCourses(cached.data.courses);
+        setFromCache(true);
+      } else {
+        setCourses([]);
+      }
     })();
     void (async () => {
       const askCurrent = !term && !weekSynced.current;
-      const res = await call('get_schedule', askCurrent ? {} : { week });
-      if (!alive) return;
-      if (res.ok) {
-        const payload = (res.data as any)?.data ?? res.data;
-        const list = Array.isArray(payload?.courses) ? payload.courses : [];
-        /* 服务端/工具算出的当前周：界面周次跟着它走，别停在默认的第 1 周 */
-        if (askCurrent && typeof payload?.week === 'number' && payload.week > 0) {
-          weekSynced.current = true;
-          void writeCache(`schedule:week:${payload.week}`, { week: payload.week, courses: list });
-          if (payload.week !== week) {
-            setWeek(payload.week);
-            setLoading(false);
-            return;
+      const live = call('get_schedule', askCurrent ? {} : { week });
+      const applyRes = async (res: { ok: boolean; data?: unknown; error?: string }) => {
+        if (!alive) return;
+        if (res.ok) {
+          const payload = (res.data as any)?.data ?? res.data;
+          const list = Array.isArray(payload?.courses) ? payload.courses : [];
+          /* 服务端/工具算出的当前周：界面周次跟着它走，别停在默认的第 1 周 */
+          if (askCurrent && typeof payload?.week === 'number' && payload.week > 0) {
+            weekSynced.current = true;
+            void writeCache(`schedule:week:${payload.week}`, { week: payload.week, courses: list });
+            if (payload.week !== week) {
+              setWeek(payload.week);
+              setLoading(false);
+              return;
+            }
+          }
+          setCourses(list);
+          setErr('');
+          setFromCache(false);
+          setAt(Date.now());
+          void writeCache(cacheKey, { week, courses: list });
+        } else {
+          /* 失败时只认这一周的缓存；没缓存就空着，别拿别的周凑数 */
+          const cached = await readCache<{ week: number; courses: Course[] }>(cacheKey, SCHEDULE_CACHE_TTL);
+          if (cached && cached.data.week === week) {
+            setCourses(cached.data.courses);
+            setErr('');
+            setFromCache(true);
+          } else {
+            setCourses([]);
+            setErr(`第 ${week} 周还没有缓存，联网后再看`);
           }
         }
-        setCourses(list);
-        setAt(Date.now());
-        void writeCache(cacheKey, { week, courses: list });
-      } else {
-        /* 失败时只认这一周的缓存；没缓存就空着，别拿别的周凑数 */
+        setLoading(false);
+      };
+      const timeout = new Promise<never>((_, reject) => {
+        window.setTimeout(() => reject(new Error('timeout')), 3_000);
+      });
+      try {
+        await applyRes(await Promise.race([live, timeout]));
+      } catch {
+        /* 3 秒没回来：先用这一周的缓存，晚到的实时数据再覆盖 */
         const cached = await readCache<{ week: number; courses: Course[] }>(cacheKey, SCHEDULE_CACHE_TTL);
-        if (cached && cached.data.week === week) {
-          setCourses(cached.data.courses);
-          setErr(`离线：第 ${week} 周课表是${ageText(cached.at)}的`);
-        } else {
-          setCourses([]);
-          setErr(`离线：第 ${week} 周还没有缓存，联网后再看`);
+        if (alive) {
+          if (cached && cached.data.week === week) {
+            setCourses(cached.data.courses);
+            setErr('');
+            setFromCache(true);
+          } else {
+            setCourses([]);
+            setErr(`第 ${week} 周还没有缓存，联网后再看`);
+          }
+          setLoading(false);
         }
+        live.then(applyRes).catch(() => {});
       }
-      setLoading(false);
     })();
     return () => {
       alive = false;
@@ -1393,6 +1424,7 @@ export function ScheduleView(props: {
           </button>
           <span>
             <b class={previewWeek !== week ? 'preview' : ''}>第 {previewWeek} 周</b> / 共 {maxWeek} 周
+            {fromCache ? <em class="offline-tag">离线课表</em> : null}
           </span>
           <button onClick={() => goWeek(1)} disabled={week >= maxWeek} aria-label="下一周">
             ›
