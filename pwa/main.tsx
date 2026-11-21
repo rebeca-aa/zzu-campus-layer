@@ -51,7 +51,7 @@ import {
   type SurveyState,
 } from '../src/core/survey';
 import { displayDayShanghai, msUntilMidnightShanghai, msUntilRollover, todayShanghai, weekOfDate } from '../src/core/util';
-import type { Term } from '../src/core/types';
+import type { Course, Term } from '../src/core/types';
 import { NoticeBoard } from '../src/ui/notice';
 import { HomeView, HomeworkView, HueLine, LineSlider, MineView, ScheduleView, TabBar, WeatherView, type Caller, type TabKey } from './views';
 import { SeatMapView } from './seatmap';
@@ -118,6 +118,25 @@ const CAS_LOGIN_PORTAL =
 const TERM_CACHE_KEY = 'campus-layer:termCache';
 
 /** 学期信息落一份本地缓存：接口抖一下也不至于把课表页打回「第 1 周」。 */
+const COURSE_TIMEOUT_MS = 8_000;
+
+/** 超时就 reject，避免实时课表卡住提醒和主页 */
+function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = window.setTimeout(() => reject(new Error('timeout')), ms);
+    p.then(
+      (v) => {
+        window.clearTimeout(timer);
+        resolve(v);
+      },
+      (e) => {
+        window.clearTimeout(timer);
+        reject(e);
+      },
+    );
+  });
+}
+
 function readCachedTerm(): Term | null {
   try {
     const raw = localStorage.getItem(TERM_CACHE_KEY);
@@ -646,21 +665,41 @@ const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
 
   const syncReminders = useCallback(async () => {
     if (!notifyClass) return;
+    const hwBlocks = homeworkReminders(hwRef.current.items, hwRef.current.settings);
+    /* 实时课表 8 秒没回来，就用上次缓存的整学期课表排提醒 */
+    const cached = await readCache<{ courses: Course[]; termStart?: string }>('courses');
+    const fromCache = () => {
+      if (!cached) return;
+      const blocks = [
+        ...buildReminderBlocks(cached.data.courses, { termStart: cached.data.termStart }),
+        ...hwBlocks,
+      ];
+      pushReminders(blocks);
+      armBrowserNotifications(blocks);
+    };
     try {
       const session = await loadSession();
-      if (!session.jwxtToken && !session.portalToken) return;
+      if (!session.jwxtToken && !session.portalToken) {
+        fromCache();
+        return;
+      }
       const svc = new CampusService(session);
-      const [courses, term] = await Promise.all([svc.courses(), svc.term().catch(() => undefined)]);
+      const [courses, term] = await withTimeout(
+        Promise.all([svc.courses(), svc.term().catch(() => undefined)]),
+        COURSE_TIMEOUT_MS,
+      );
+      void writeCache('courses', { courses, termStart: term?.startDate });
       const blocks = [
         ...buildReminderBlocks(courses, { termStart: term?.startDate }),
         /* 作业截止提醒跟课前提醒共用一套闹钟；已交的不会排 */
-        ...homeworkReminders(hwRef.current.items, hwRef.current.settings),
+        ...hwBlocks,
       ];
       pushReminders(blocks);
       /* 网页版没有系统闹钟：页面开着时用浏览器通知兜底 */
       armBrowserNotifications(blocks);
     } catch {
-      /* 提醒排不上不该影响聊天 */
+      /* 超时 / 接口抽风：退回缓存课表，别让提醒断档 */
+      fromCache();
     }
   }, [notifyClass]);
 
@@ -1414,7 +1453,10 @@ const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
 
       {tab === 'weather' && (
         <div class="page-live" key="weather">
-          <WeatherView today={today} />
+          <WeatherView
+            today={today}
+            onBack={() => goTab('home')}
+          />
         </div>
       )}
 
@@ -1610,7 +1652,7 @@ const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
                 stepBack();
               }}
             >
-              ‹ 返回
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m14.5 5.5-6.5 6.5 6.5 6.5" /></svg> 返回
             </button>
             <strong>登录</strong>
           </div>
@@ -1710,7 +1752,7 @@ const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
                 stepBack();
               }}
             >
-              ‹ 返回
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m14.5 5.5-6.5 6.5 6.5 6.5" /></svg> 返回
             </button>
             <strong>外观</strong>
           </div>
@@ -1874,7 +1916,7 @@ const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
                 stepBack();
               }}
             >
-              ‹ 返回
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m14.5 5.5-6.5 6.5 6.5 6.5" /></svg> 返回
             </button>
             <strong>设置</strong>
           </div>
@@ -1912,8 +1954,9 @@ const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
                 setNavDir('back');
                 stepBack();
               }}
+            aria-label="返回我的"
             >
-              ‹ 返回
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m14.5 5.5-6.5 6.5 6.5 6.5" /></svg>
             </button>
             <strong>作业</strong>
           </div>
@@ -1942,7 +1985,7 @@ const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
                 stepBack();
               }}
             >
-              ‹ 返回
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m14.5 5.5-6.5 6.5 6.5 6.5" /></svg> 返回
             </button>
             <strong>反馈与问卷</strong>
           </div>
@@ -2008,7 +2051,7 @@ const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
                 stepBack();
               }}
             >
-              ‹ 返回
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m14.5 5.5-6.5 6.5 6.5 6.5" /></svg> 返回
             </button>
             <strong>关于</strong>
           </div>
@@ -2123,7 +2166,7 @@ const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
                 closeNotices();
               }}
             >
-              ‹ 返回
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m14.5 5.5-6.5 6.5 6.5 6.5" /></svg> 返回
             </button>
             <strong>通知</strong>
           </div>

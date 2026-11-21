@@ -2856,3 +2856,34 @@ html[data-theme='cream'] .hw-chip b.bad { color: #b4342f; }
 .mine-row-warn .s {
   color: var(--dim);
 }
+
+/* 天气页左上角返回主页 */
+header.top .who.wx-who {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.wx-back {
+  display: inline-grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  margin-left: -6px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--accent);
+  cursor: pointer;
+}
+
+.wx-back:active {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.subhead button svg,
+.seatmap .back svg,
+header .termline .back svg {
+  display: inline-block;
+  vertical-align: -3px;
+}

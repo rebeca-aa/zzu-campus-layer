@@ -272,7 +272,14 @@ export function HomeView(props: {
 
     /* 课表排在第一个、单独一条：它最快回来，回来就立刻渲染 */
     void (async () => {
-      const sched = await call('get_schedule', { day: rolled ? 'tomorrow' : 'today' });
+      /* 实时课表 8 秒没回来就用缓存；缓存已经先铺上了，这里只补一句提示 */
+      const timeout = new Promise<never>((_, reject) => {
+        window.setTimeout(() => reject(new Error('timeout')), 8_000);
+      });
+      const sched = await Promise.race([
+        call('get_schedule', { day: rolled ? 'tomorrow' : 'today' }),
+        timeout,
+      ]).catch(() => ({ ok: false as const, error: '实时课表 8 秒没回来，先用缓存' }));
       if (!alive) return;
       if (authFail(sched)) setNeedLogin(true);
       if (sched.ok && sched.data) {
@@ -1493,7 +1500,7 @@ function WeatherGlyph({ name, size = 28 }: { name: WeatherIconName; size?: numbe
 const WX_LABEL: Record<number, string> = { [-1]: '昨天', 0: '今天', 1: '明天', 2: '后天' };
 const WEEK_CN = ['', '周一', '周二', '周三', '周四', '周五', '周六', '周日'];
 
-export function WeatherView({ today }: { today: string }) {
+export function WeatherView({ today, onBack }: { today: string; onBack: () => void }) {
   const [wx, setWx] = useState<Weather | null>(null);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState('');
@@ -1587,9 +1594,16 @@ export function WeatherView({ today }: { today: string }) {
   return (
     <>
       <header class="top">
-        <div class="who">
-          <h1>天气</h1>
-          <div class="sub">郑州 · 主校区</div>
+        <div class="who wx-who">
+          <button class="wx-back" aria-label="返回主页" onClick={onBack}>
+            <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="m14.5 5.5-6.5 6.5 6.5 6.5" />
+            </svg>
+          </button>
+          <div>
+            <h1>天气</h1>
+            <div class="sub">郑州 · 主校区</div>
+          </div>
         </div>
         <div class="acts">
           <button
